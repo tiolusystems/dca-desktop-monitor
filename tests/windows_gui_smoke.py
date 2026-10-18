@@ -391,8 +391,39 @@ def main():
             assert "EXTERNOS AO CSV" in first_ui._posicoes.cget("text")
             assert "Cold wallet" in first_ui._posicoes.cget("text")
             assert new_db.carregar_operacoes_precisas() == []
+            # CUST-01: new GUI fields are available for an auditable transfer.
+            assert first_ui._mov_campos["Taxa cobrada no ativo"].winfo_exists()
+            assert first_ui._tipo_movimento.get() == "transferencia"
+            print("GUI_CUST01_MOVIMENTACAO_EXTERNAS=PASS")
+
             first_win.destroy()
             print("GUI_PRE01_CUSTODIA_EXTERNA_SEM_COMPRA=PASS")
+
+            # DIST/OPS: settings are real desktop controls, not new dashboard tabs.
+            app._abrir_configuracoes()
+            root.update_idletasks()
+            root.update()
+            settings=app._janela_aplicativo
+            assert settings.winfo_exists()
+            assert settings._btn_instalar.cget("state") == "disabled"
+            assert settings.btn_atalho.cget("state") == "disabled"
+            backups,invalid=settings._verificar_backups()
+            assert backups and not invalid
+            assert settings.variavel_bandeja.get() is False
+            settings.variavel_bandeja.set(True)
+            settings._alternar_bandeja()
+            assert app._preferences["minimizar_para_bandeja"] is True
+            with patch.object(app._tray,"iniciar") as started:
+                app._on_closing()
+                started.assert_called_once()
+                assert not app._closing and app._tray_hidden
+            app._restaurar_da_bandeja()
+            assert not app._tray_hidden
+            settings.variavel_bandeja.set(False)
+            settings._alternar_bandeja()
+            assert not app._preferences["minimizar_para_bandeja"]
+            print("GUI_DIST_SETTINGS_TRAY_BACKUP=PASS")
+            settings.destroy()
 
             # OPS-01: repeated refresh requests must not start parallel
             # workers or commit background results after window destruction.
