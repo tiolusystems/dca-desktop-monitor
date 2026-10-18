@@ -273,6 +273,74 @@ def main():
             print("GUI_FIN06_RETORNO_DIETZ=PASS")
             print("GUI_FIN06_PNL_HISTORICO_SOMENTE_USDT=PASS")
             dash.display_currency = "USD"
+            # UI-01: even at a compact desktop viewport, none of the
+            # ten financial columns may be compressed into an unreadable grid.
+            root.state("normal")
+            root.geometry("980x700+5+5")
+            root.update_idletasks()
+            root.update()
+            dash = app.aba_distribuicao
+            canvas = dash._det_canvas
+            assert canvas.winfo_width() >= 250, canvas.winfo_width()
+            assert canvas.xview()[1] < 0.99, (
+                "A grade não tem colunas laterais navegáveis.", canvas.xview()
+            )
+            assert len(dash._det_rows[0]._labels) == 10
+            assert dash._det_rows[0]._labels[9].winfo_width() >= 90
+            canvas.xview_moveto(1.0)
+            root.update()
+            assert canvas.xview()[0] > 0.10, canvas.xview()
+            assert canvas.winfo_width() < dash._det_rows[0].winfo_width()
+            print("GUI_UI01_DASHBOARD_HORIZONTAL=PASS")
+            canvas.xview_moveto(0.0)
+
+            analise = app.aba_analise
+            assert analise._conteudo_rolavel.winfo_exists()
+            analise._data_cotacao.delete(0, "end")
+            analise._data_cotacao.insert(0, "2026-09-30")
+            assert analise._apurar_valor_historico()["patrimonio_total"] == Decimal("2180")
+            assert "2,180.00" in analise._historico_cards["patrimonio_total"].cget("text")
+            assert "1,680.00" in analise._historico_cards["caixa_usdt"].cget("text")
+            assert analise._historico_valores.cget("wraplength") <= 900
+            scroll = analise._conteudo_rolavel._parent_canvas
+            root.update()
+            assert scroll.yview()[1] < 1.0, scroll.yview()
+            scroll.yview_moveto(1.0)
+            root.update()
+            assert scroll.yview()[0] > 0.0, scroll.yview()
+            assert analise._arvore.winfo_exists()
+            print("GUI_UI01_ANALYSIS_SCROLL_AND_CARDS=PASS")
+            assert analise._arvore.column("compras_periodo")["minwidth"] >= 160
+            assert analise._arvore.column("realizado_historico")["minwidth"] >= 170
+            print("GUI_UI01_TITULOS_EXTRATO_LEGIVEIS=PASS")
+            dash.set_status(
+                "Retorno não apurado: histórico USDC sem custo de aquisição comprovado",
+                "#95a5b2",
+            )
+            assert dash._badge._lbl.cget("text") == "Verificar dados"
+            assert "USDC" in dash._status_detalhe.cget("text")
+            assert dash._status_detalhe.cget("wraplength") <= 950
+            print("GUI_UI01_AVISOS_FINANCEIROS_SEM_CORTE=PASS")
+
+            app.tabview.set("✏️  Registrar Operação")
+            root.update_idletasks()
+            root.update()
+            form_scroller = app.aba_registro._scroll_registro._parent_canvas
+            assert app.aba_registro._btn_salvar.winfo_exists()
+            form_scroller.yview_moveto(1.0)
+            root.update()
+            assert form_scroller.yview()[0] > 0.0, form_scroller.yview()
+            print("GUI_UI01_OPERACAO_CONFIRMACAO_ACESSIVEL=PASS")
+
+            app.tabview.set("💰  Caixa (USD/BRL)")
+            root.update_idletasks()
+            root.update()
+            extrato = app.aba_caixa.tree
+            assert app.aba_caixa._extrato_scroll_horizontal.winfo_exists()
+            for coluna in ("Data", "Tipo", "Descrição", "Saldo Atualizado"):
+                assert extrato.column(coluna)["minwidth"] >= 150
+            print("GUI_UI01_CAIXA_COLUNAS_PRESERVADAS=PASS")
+
             print("GUI_INTEGRADA=PASS")
             print("MODULOS=SQLite+AnalysisEngine+AssetPeriodAnalytics+CustomTkinter")
             print("REGISTROS_MIGRADOS=" + str(dm._store.diagnostico_integridade()["operacoes_importadas"]))
