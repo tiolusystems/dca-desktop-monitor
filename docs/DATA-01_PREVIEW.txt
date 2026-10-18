@@ -1,0 +1,20 @@
+DCA MONITOR — DATA-01: PREVIEW WINDOWS
+
+Demonstração portátil com operações 100% FICTICIAS.
+NAO e instalador nem atualizacao da aplicacao original.
+
+1) Extraia o ZIP completo em uma nova pasta.
+2) Abra DCA-Data01-Preview.exe.
+3) Apos abrir, procure a pasta preview-data ao lado do executavel:
+   portfolio.sqlite3 sera criado e conterá os registros ficticios.
+4) Procure preview-data/backups/ — copia integra do CSV original.
+5) Feche e abra novamente: os mesmos registros devem aparecer sem duplicar.
+6) Registre UMA operacao ficticia, feche e abra: devera continuar no historico.
+7) NAO copie este executavel sobre o software original nem insira dados reais.
+8) O arquivo original esta em _internal/db/meu_diario_operacoes.csv;
+   ele NAO devera ser alterado. A demonstracao nao acessa AppData real.
+9) Excluir a pasta de demonstracao remove somente o conjunto ficticio.
+
+Esta PR ainda nao cria o assistente de importacao de CSVs de outras pastas.
+A interface e os calculos financeiros permanecem os da versao de referencia.
+PR: https://github.com/tiolusystems/dca-desktop-monitor/pulls
