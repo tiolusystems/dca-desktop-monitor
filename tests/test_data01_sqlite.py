@@ -1,5 +1,6 @@
 """Regressões de DATA-01 — migração segura e escrita transacional."""
 import csv
+from contextlib import closing
 import hashlib
 from pathlib import Path
 import sqlite3
@@ -40,7 +41,7 @@ class Data01Tests(unittest.TestCase):
         sha = hashlib.sha256(conteudo).hexdigest()
         backup = self.data_dir / "backups" / ("legado-" + sha + ".csv")
         self.assertEqual(backup.read_bytes(), conteudo)
-        with sqlite3.connect(d.arquivo_db) as con:
+        with closing(sqlite3.connect(d.arquivo_db)) as con:
             self.assertEqual(con.execute("SELECT sha256, quantidade_registros FROM importacoes_legadas").fetchone(), (sha, 2))
             self.assertEqual(con.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 
@@ -61,7 +62,7 @@ class Data01Tests(unittest.TestCase):
         with self.assertRaisesRegex(ErroMigracao, "modificado"):
             d.carregar_operacoes()
         self.assertFalse(d.salvar_operacao(["2026-01-03 10:00:00", "ETH", "compra", 50, 500, 0.1, 5.0]))
-        with sqlite3.connect(d.arquivo_db) as con:
+        with closing(sqlite3.connect(d.arquivo_db)) as con:
             self.assertEqual(con.execute("SELECT COUNT(*) FROM operacoes").fetchone()[0], 2)
 
     def test_csv_invalido_nao_produz_migracao_parcial(self):
@@ -69,7 +70,7 @@ class Data01Tests(unittest.TestCase):
         self.csv.write_text(texto, encoding="utf-8")
         with self.assertRaisesRegex(ErroMigracao, "Valor_USDT"):
             self.app()
-        with sqlite3.connect(self.data_dir / "portfolio.sqlite3") as con:
+        with closing(sqlite3.connect(self.data_dir / "portfolio.sqlite3")) as con:
             self.assertEqual(con.execute("SELECT COUNT(*) FROM operacoes").fetchone()[0], 0)
             self.assertEqual(con.execute("SELECT COUNT(*) FROM importacoes_legadas").fetchone()[0], 0)
         self.assertEqual(self.csv.read_text(encoding="utf-8"), texto)
