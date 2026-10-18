@@ -124,5 +124,30 @@ class Data01Tests(unittest.TestCase):
         self.assertEqual(portfolio["BTC"]["quantidade_final"], 0)
 
 
+    def test_relatorio_visual_confere_sqlite_backup_e_operacoes(self):
+        d = self.app()
+        report = d._store.diagnostico_integridade()
+        self.assertEqual(report["status"], "OK")
+        self.assertEqual(report["integridade_sqlite"], "ok")
+        self.assertEqual(report["operacoes_importadas"], 2)
+        self.assertEqual(report["operacoes_atuais"], 2)
+        self.assertTrue(report["backup_valido"])
+        self.assertEqual(report["csv_original"], "preservado")
+        self.assertTrue(d.salvar_operacao([
+            "2026-01-03 10:00:00", "ETH", "compra", 25, 250, 0.1, 5.3
+        ]))
+        self.assertEqual(d._store.diagnostico_integridade()["operacoes_atuais"], 3)
+
+    def test_relatorio_identifica_backup_adulterado(self):
+        d = self.app()
+        dados = d._store.diagnostico_integridade()
+        backup = self.data_dir / "backups" / ("legado-" + dados["hash_legado"] + ".csv")
+        backup.write_text("DADOS ADULTERADOS", encoding="utf-8")
+        relatorio = d._store.diagnostico_integridade()
+        self.assertEqual(relatorio["status"], "FALHA")
+        self.assertFalse(relatorio["backup_valido"])
+        self.assertEqual(self.csv.read_text(encoding="utf-8"), CABECALHO + COMPRA + VENDA)
+
+
 if __name__ == "__main__":
     unittest.main()
