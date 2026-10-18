@@ -220,21 +220,21 @@ class PortfolioDCA:
                 titulo = "DATA-01 — BANCO E BACKUP VERIFICADOS"
                 aviso = messagebox.showinfo
             aviso(titulo, (
-                "AMBIENTE DE DEMONSTRAÇÃO (DADOS FICTÍCIOS)\\n\\n"
-                f"SQLite: {estado['integridade_sqlite']}\\n"
-                f"Registros importados do CSV: {estado['operacoes_importadas']}\\n"
-                f"Registros atuais no banco: {estado['operacoes_atuais']}\\n"
-                f"Backup do CSV íntegro: {'SIM' if estado['backup_valido'] else 'NÃO'}\\n"
-                f"Arquivo original: {estado['csv_original']}\\n"
-                f"Hash de origem: {estado.get('hash_legado', 'N/A')}\\n\\n"
-                f"Banco local: {estado['banco']}\\n\\n"
-                "O arquivo CSV original não foi substituído.\\n"
+                "AMBIENTE DE DEMONSTRAÇÃO (DADOS FICTÍCIOS)\n\n"
+                f"SQLite: {estado['integridade_sqlite']}\n"
+                f"Registros importados do CSV: {estado['operacoes_importadas']}\n"
+                f"Registros atuais no banco: {estado['operacoes_atuais']}\n"
+                f"Backup do CSV íntegro: {'SIM' if estado['backup_valido'] else 'NÃO'}\n"
+                f"Arquivo original: {estado['csv_original']}\n"
+                f"Hash de origem: {estado.get('hash_legado', 'N/A')}\n\n"
+                f"Banco local: {estado['banco']}\n\n"
+                "O arquivo CSV original não foi substituído.\n"
                 "A interface financeira ainda é a do software original."
             ))
         except Exception as exc:
             messagebox.showerror(
                 "DATA-01 — NÃO FOI POSSÍVEL VERIFICAR",
-                f"A integridade não pôde ser demonstrada:\\n{exc}",
+                f"A integridade não pôde ser demonstrada:\n{exc}",
             )
 
     def _preencher_dados_iniciais(self):
