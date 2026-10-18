@@ -157,6 +157,68 @@ def main():
             root.update_idletasks()
             root.update()
             assert "Indisponível" not in dash._lbl_patrimonio.cget("text")
+            # FIN-04: USDC does not finance USDT, and is not a 1:1 asset.
+            assert dm.salvar_operacao([
+                "2026-10-02 09:00:00", "USDC", "compra",
+                "200", "5.12", "200", "5.12",
+            ])
+            stable = app.analysis_engine.calcular_saldo_usdt(dm.carregar_operacoes())
+            assert stable["saldo_atual"] == 1680, stable
+            app.aba_caixa._atualizar_ui(
+                stable,
+                __import__("backend.stablecoin_ledger", fromlist=["saldos_stablecoins"])
+                .saldos_stablecoins(dm.carregar_operacoes_precisas()),
+            )
+            assert "200.00" in app.aba_caixa.lbl_saldo_usdc.cget("text")
+            assert "Não convertido" in app.aba_caixa.lbl_fluxo_usdc.cget("text")
+            cotados = {**FakePriceManager.precos_cache, "USDC": 0.965}
+            carteira = app.analysis_engine.calcular_portfolio(
+                dm.carregar_operacoes(), cotados
+            )
+            distribuicao = app.analysis_engine.calcular_distribuicao_portfolio(
+                dm.carregar_operacoes(), cotados
+            )
+            dash._atualizar_ui(carteira, None, distribuicao, 5.1)
+            root.update_idletasks()
+            root.update()
+            assert carteira["totais"]["valor_atual"] == 2623
+            assert "2,623" in dash._lbl_patrimonio.cget("text")
+            assert dash._lbl_pl_nr.cget("text") == "Indisponível"
+            usdc_rows = [
+                row for row in dash._det_rows
+                if row._labels[0].cget("text") == "USDC (Caixa)"
+            ]
+            assert len(usdc_rows) == 1
+            assert "200" in usdc_rows[0]._labels[1].cget("text")
+            assert "Não apurado" in usdc_rows[0]._labels[4].cget("text")
+            assert "USDC" in distribuicao["distribuicao"]
+            print("GUI_FIN04_SALDOS_SEPARADOS=PASS")
+            print("GUI_FIN04_PATRIMONIO_USDC_0_965=2623 USDT")
+            # Falha parcial da Binance deve recalcular a tela — jamais
+            # reter um valor anterior como atual ou interromper o callback.
+            from unittest.mock import patch
+            chamadas_refresh = []
+            original_refresh = app._atualizar_abas_seguro
+            original_preco = app.price_manager.atualizar_precos
+            app._atualizar_abas_seguro = (
+                lambda precos_completos=True: chamadas_refresh.append(precos_completos)
+            )
+            app.price_manager.atualizar_precos = lambda moedas: False
+
+            class ThreadDireta:
+                def __init__(self, target, daemon=False):
+                    self.target = target
+                def start(self):
+                    self.target()
+
+            with patch.object(entry["threading"], "Thread", ThreadDireta):
+                app.atualizar_todas_as_analises()
+            root.update_idletasks()
+            root.update()
+            assert False in chamadas_refresh, chamadas_refresh
+            app._atualizar_abas_seguro = original_refresh
+            app.price_manager.atualizar_precos = original_preco
+            print("GUI_FIN04_FALHA_COTACAO_RECALCULA=PASS")
             print("GUI_FIN02_SEM_COTACAO=PASS")
             print("GUI_FIN02_RECUPERACAO=PASS")
             print("GUI_INTEGRADA=PASS")
