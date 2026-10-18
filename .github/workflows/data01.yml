@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'main.pyw'
       - 'tests/**'
       - 'docs/DATA-01*'
       - '.github/workflows/data01.yml'
