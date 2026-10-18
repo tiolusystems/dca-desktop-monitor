@@ -7,6 +7,7 @@ from pathlib import Path
 import runpy
 import tempfile
 import sys
+from datetime import date, datetime, timezone
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -38,6 +39,20 @@ def main():
         assert model["ativos"]["LINK"]["realizado_historico"] == Decimal("0")
         assert model["ativos"]["ETH"]["custo_aberto"] == Decimal("600")
 
+        # Cotação histórica de ETH difere deliberadamente do preço atual do fake.
+        ontem = date(2026, 9, 30)
+        dm._store.salvar_cotacoes_historicas([{
+            "data_utc": ontem.isoformat(),
+            "ativo": "ETH",
+            "moeda_cotacao": "USDT",
+            "preco": "1000",
+            "fonte": "Binance/CCXT:OHLCV:1d:close",
+            "abertura_utc_ms": int(datetime(
+                2026, 9, 30, tzinfo=timezone.utc
+            ).timestamp() * 1000),
+            "capturado_em_utc": datetime.now(timezone.utc).isoformat(),
+        }])
+
         entry = runpy.run_path(str(projeto / "main.pyw"), run_name="dca_gui_smoke")
         root = ctk.CTk()
         try:
@@ -61,6 +76,35 @@ def main():
                 for row in rows
             }
             assert nomes == {"BTC", "ETH", "SOL", "LINK"}, nomes
+            # Renderização real: preço atual ETH=1500, histórico ETH=1000.
+            ui = app.aba_analise
+            ui._data_cotacao.delete(0, "end")
+            ui._data_cotacao.insert(0, "2026-09-30")
+            historico = ui._apurar_valor_historico()
+            assert historico["completo"]
+            assert historico["patrimonio_total"] == Decimal("2180")
+            assert "2,180.00" in ui._historico_valores.cget("text")
+            janela_detalhes = ui._detalhar_ativos_na_data()
+            root.update_idletasks()
+            root.update()
+            linhas = [
+                ui._detalhes_tabela.item(item)["values"]
+                for item in ui._detalhes_tabela.get_children()
+            ]
+            assert len(linhas) == 4
+            eth = next(row for row in linhas if row[0] == "ETH")
+            btc = next(row for row in linhas if row[0] == "BTC")
+            assert "500" in str(eth[4]), eth
+            assert "300" in str(btc[5]), btc
+            janela_detalhes.destroy()
+            ui._data_cotacao.delete(0, "end")
+            ui._data_cotacao.insert(0, "2026-09-29")
+            historico_sem_dado = ui._apurar_valor_historico()
+            assert historico_sem_dado["patrimonio_total"] is None
+            assert "INDISPONÍVEL" in ui._historico_valores.cget("text")
+            print("GUI_HISTORICA=PASS")
+            print("PATRIMONIO_2026_09_30=2180 USDT")
+            print("PATRIMONIO_SEM_COTACAO=INDISPONIVEL")
             print("GUI_INTEGRADA=PASS")
             print("MODULOS=SQLite+AnalysisEngine+AssetPeriodAnalytics+CustomTkinter")
             print("REGISTROS_MIGRADOS=" + str(dm._store.diagnostico_integridade()["operacoes_importadas"]))
