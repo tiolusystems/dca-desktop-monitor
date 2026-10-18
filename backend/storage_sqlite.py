@@ -284,6 +284,55 @@ class ArmazemSQLite:
         finally:
             con.close()
 
+    def diagnostico_integridade(self) -> dict:
+        """Lê o estado do SQLite e confere proveniência do backup, sem alterar dados."""
+        con = self._conectar()
+        try:
+            integridade = con.execute("PRAGMA quick_check").fetchone()[0]
+            total_atual = con.execute("SELECT COUNT(*) FROM operacoes").fetchone()[0]
+            importacao = con.execute(
+                "SELECT sha256, caminho_origem, caminho_backup, quantidade_registros "
+                "FROM importacoes_legadas LIMIT 1"
+            ).fetchone()
+        finally:
+            con.close()
+
+        resultado = {
+            "banco": str(self.arquivo_db),
+            "integridade_sqlite": integridade,
+            "operacoes_atuais": total_atual,
+            "importacao": bool(importacao),
+            "operacoes_importadas": 0,
+            "backup_valido": None,
+            "csv_original": "não importado",
+            "status": "OK" if integridade == "ok" else "FALHA",
+        }
+        if not importacao:
+            return resultado
+
+        sha, origem, backup, quantidade = importacao
+        arquivo_backup = Path(backup)
+        backup_valido = (
+            arquivo_backup.is_file()
+            and hashlib.sha256(arquivo_backup.read_bytes()).hexdigest() == sha
+        )
+        arquivo_origem = Path(origem)
+        if arquivo_origem.is_file():
+            sha_atual = hashlib.sha256(arquivo_origem.read_bytes()).hexdigest()
+            status_csv = "preservado" if sha_atual == sha else "ALTERADO"
+        else:
+            status_csv = "movido/ausente"
+
+        resultado.update(
+            operacoes_importadas=quantidade,
+            backup_valido=backup_valido,
+            csv_original=status_csv,
+            hash_legado=sha,
+        )
+        if not backup_valido or status_csv == "ALTERADO":
+            resultado["status"] = "FALHA"
+        return resultado
+
     def exportar_csv(self, destino: Path):
         destino = Path(destino).expanduser().resolve()
         if self.arquivo_legado and destino == self.arquivo_legado:
