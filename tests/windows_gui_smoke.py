@@ -284,13 +284,22 @@ def main():
             root.update_idletasks()
             pump(root)
             assert dash._lbl_retorno.cget("text") == "+10.00%"
-            assert "100.00 USDT" in dash._lbl_pl_r.cget("text")
-            assert "100.00 USDT" in dash._lbl_pl.cget("text")
-            assert "BRL" not in dash._lbl_pl_r.cget("text")
-            assert "BRL" not in dash._lbl_custo.cget("text")
+            # A missing documented BRL book cannot be relabeled from
+            # historical USDT profit. In BRL view, fail closed.
+            assert dash._lbl_pl_r.cget("text") == "Indisponível", dash._lbl_pl_r.cget("text")
+            assert dash._lbl_pl.cget("text") == "Indisponível", dash._lbl_pl.cget("text")
+            assert dash._lbl_custo.cget("text") == "Indisponível", dash._lbl_custo.cget("text")
+            print("GUI_FIN06_BRL_SEM_LIVRO_INDISPONIVEL=PASS")
+            # Switching explicitly to USDT restores the known 100 USDT
+            # result without deriving fictional BRL cost or profit.
+            dash.display_currency = "USD"
+            dash._atualizar_ui(portfolio_audit, None, dist_audit, 5.10, audit)
+            root.update_idletasks()
+            pump(root)
+            assert "100.00 USDT" in dash._lbl_pl_r.cget("text"), dash._lbl_pl_r.cget("text")
+            assert "100.00 USDT" in dash._lbl_pl.cget("text"), dash._lbl_pl.cget("text")
             print("GUI_FIN06_RETORNO_DIETZ=PASS")
             print("GUI_FIN06_PNL_HISTORICO_SOMENTE_USDT=PASS")
-            dash.display_currency = "USD"
             # UI-01: even at a compact desktop viewport, none of the
             # ten financial columns may be compressed into an unreadable grid.
             root.state("normal")
