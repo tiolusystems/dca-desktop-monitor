@@ -38,3 +38,12 @@ Não é necessário Python para executar os binários finais. Dados pessoais per
 ## Evidência
 
 Este documento não é recibo de CI, merge, aprovação, publicação ou homologação. Registrar SHA final, links de CI, aprovação, tag e release após sua ocorrência efetiva.
+
+## Validação do commit integrado
+
+O workflow oficial também executa os jobs de pacotes no push em `main`, sem
+publicar nessa execução. A publicação pela tag exige que o SHA aprovado seja
+exatamente o HEAD atual de `origin/main`, além da ancestralidade e versão.
+`tests/test_release_commit_gate.py` executa o gate real em histórico Git sintético:
+aprovação ausente ou divergente, ancestral antigo e referência/versão incorretas
+devem ser recusados. Esses testes não comprovam proteções administrativas do GitHub.
