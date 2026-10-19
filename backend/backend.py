@@ -54,6 +54,9 @@ class DataManager:
         """API de cálculo histórico exato; não converte números a float."""
         return self._store.listar_preciso()
 
+    def carregar_operacao_para_edicao(self, indice):
+        return self._store.listar_preciso()[indice]
+
     def importar_csv_legado(self, caminho: str) -> int:
         return self._store.importar_csv(Path(caminho))
 
@@ -95,8 +98,12 @@ class DataManager:
         from backend.storage_sqlite import ErroArmazenamento
 
         self.ultimo_erro = None
+        self.ultimo_aviso_backup = None
         try:
             sucesso = operacao()
+            self.ultimo_aviso_backup = getattr(self._store,"ultimo_aviso_backup",None)
+            if self.ultimo_aviso_backup:
+                logger.error(self.ultimo_aviso_backup)
             if not sucesso:
                 self.ultimo_erro = "Operação não encontrada; recarregue o histórico."
             return sucesso
@@ -111,14 +118,14 @@ class DataManager:
             logger.exception("Falha ao %s; transação revertida", descricao)
             return False
 
-    def excluir_operacao(self, indice: int) -> bool:
+    def excluir_operacao(self, indice: int, *, motivo=None) -> bool:
         return self._executar_mutacao(
-            "excluir", lambda: self._store.excluir(indice)
+            "excluir", lambda: self._store.excluir(indice,motivo=motivo)
         )
 
-    def atualizar_operacao(self, indice: int, nova_operacao: Dict) -> bool:
+    def atualizar_operacao(self, indice: int, nova_operacao: Dict, *, motivo=None) -> bool:
         return self._executar_mutacao(
-            "alterar", lambda: self._store.substituir(indice, nova_operacao)
+            "alterar", lambda: self._store.substituir(indice, nova_operacao,motivo=motivo)
         )
 
     def salvar_operacao(self, operacao: List) -> bool:
@@ -339,7 +346,8 @@ class AnalysisEngine:
             "saldos_externos_declarados": len(saldos_externos),
             "movimentacoes_custodia": custodia["movimentacoes"],
             "resultado_custodia_usdt": (
-                float(custodia["lucro_vendas_externas_usdt"])
+                float(custodia["lucro_vendas_externas_usdt"]
+                      - custodia["custo_taxas_transferencias_usdt"])
                 if custodia["lucro_vendas_externas_usdt"] is not None else None
             ),
             "custo_taxas_transferencias_usdt": (
@@ -421,8 +429,20 @@ class AnalysisEngine:
             else:
                 totais["valor_atual"] += float(ext["q"]) * spot
 
+        totais["realizado_csv"] = totais["realizado"]
         if custodia["lucro_vendas_externas_usdt"] is not None:
-            totais["realizado"] += float(custodia["lucro_vendas_externas_usdt"])
+            totais["realizado"] += totais["resultado_custodia_usdt"]
+        else:
+            totais["realizado"] = None
+        for coin, ext_result in custodia["resultados_por_ativo"].items():
+            row = resultado.setdefault(coin, AnalysisEngine._analisar_moeda([], None))
+            row["lucro_realizado_csv"] = row["lucro_realizado"]
+            gain = ext_result["realizado_historico"]
+            row["lucro_realizado"] = (None if gain is None or row["lucro_realizado"] is None
+                                      else row["lucro_realizado"] + float(gain))
+            row["lucro_total"] = (None if row["lucro_realizado"] is None
+                                  or row["lucro_nao_realizado"] is None else
+                                  row["lucro_realizado"] + row["lucro_nao_realizado"])
         if saldo_usdc > 0:
             preco_usdc = AnalysisEngine._preco_disponivel(precos_atuais.get("USDC"))
             valor_usdc = float(saldo_usdc * Decimal(str(preco_usdc))) if preco_usdc is not None else None

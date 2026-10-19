@@ -50,3 +50,34 @@ def executar_manutencao_restauracao(manifesto: Path, banco: Path) -> bool:
         return True
     finally:
         window.destroy()
+
+
+def executar_assistente_recuperacao():
+    """Entry point independent of the operational DB and normal GUI boot."""
+    from tkinter import filedialog
+    from backend.storage_sqlite import diretorio_dados_padrao
+    chooser=Tk();chooser.withdraw()
+    try:
+        manifest=filedialog.askopenfilename(parent=chooser,title='Escolher manifesto do backup DCA',
+                                           filetypes=[('Backup DCA','*.json *.zip')])
+        if not manifest:return False
+        if Path(manifest).suffix.lower()=='.zip':
+            import os,sys,subprocess,secrets
+            from backend.recovery_bundle import recuperar_pacote
+            parent=filedialog.askdirectory(parent=chooser,title='Escolher local para NOVA pasta recuperada')
+            if not parent:return False
+            target=Path(parent)/('DCA-Recuperado-'+secrets.token_hex(4))
+            try:
+                result=recuperar_pacote(manifest,target)
+            except Exception as exc:
+                messagebox.showerror('Recuperação recusada',str(exc),parent=chooser)
+                return False
+            if messagebox.askyesno('Carteira recuperada',
+                'Dados verificados em '+result['diretorio']+'. Abrir esta carteira recuperada?',parent=chooser):
+                command=[sys.executable]
+                if not getattr(sys,'frozen',False):command.append(str(Path(__file__).resolve().parents[1]/'main.pyw'))
+                subprocess.Popen(command,env={**os.environ,'DCA_MONITOR_DATA_DIR':str(target)})
+            return True
+        return executar_manutencao_restauracao(Path(manifest),diretorio_dados_padrao()/'portfolio.sqlite3')
+    finally:
+        chooser.destroy()

@@ -1,3 +1,4 @@
+from backend.ui_dispatch import UiDispatcher
 """Consulta histórica por ativo e consolidada (somente dados demonstráveis)."""
 from datetime import date, datetime, timedelta, timezone
 import threading
@@ -41,6 +42,7 @@ class JanelaAnalisePeriodo(ctk.CTkFrame):
 
     def __init__(self, parent, data_manager):
         super().__init__(parent, fg_color="transparent")
+        self._tasks = UiDispatcher(self)
         self._dados = data_manager
         self._filtro_periodo = ctk.StringVar(value="Todo o histórico")
         self._filtro_ativo = ctk.StringVar(value="Todos os ativos")
@@ -52,11 +54,11 @@ class JanelaAnalisePeriodo(ctk.CTkFrame):
 
     @staticmethod
     def _valor(x: Decimal, casas=2):
-        return f"{x:,.{casas}f}"
+        return "Não apurado" if x is None else f"{x:,.{casas}f}"
 
     @staticmethod
     def _positivo(x: Decimal):
-        return NEON_GREEN if x >= 0 else NEON_RED
+        return TEXT_SECONDARY if x is None else NEON_GREEN if x >= 0 else NEON_RED
 
     def _construir(self):
         # Em janelas pequenas, filtros e cartões não devem esconder a tabela.
@@ -383,7 +385,8 @@ class JanelaAnalisePeriodo(ctk.CTkFrame):
         ).pack(anchor="w", padx=20, pady=(17, 6))
         ctk.CTkLabel(
             janela,
-            text="Cotação = fechamento UTC do dia gravado no SQLite. "
+            text=f"Versão emitida: {resultado.get('versao_resultado', 'não versionada')}\n"
+                 "Cotação = fechamento UTC do dia gravado no SQLite. "
                  "Sem cotação, posição aberta fica INDISPONÍVEL; "
                  "posição encerrada preserva o resultado realizado.",
             font=ctk.CTkFont("Segoe UI", 11), text_color=TEXT_SECONDARY
@@ -484,11 +487,11 @@ class JanelaAnalisePeriodo(ctk.CTkFrame):
                 else:
                     self._apurar_valor_historico()
             try:
-                self.after(0, concluir)
+                self._tasks.post(concluir)
             except Exception:
                 pass
 
-        threading.Thread(target=worker, daemon=True).start()
+        self._tasks.run(worker)
 
     def _on_periodo(self, selecionado, recarregar=True):
         estado = "normal" if selecionado == "Personalizado" else "disabled"
@@ -573,7 +576,7 @@ class JanelaAnalisePeriodo(ctk.CTkFrame):
             ]
             self._arvore.insert(
                 "", "end", values=valores,
-                tags=("negativo" if s["realizado_periodo"] < 0 else "positivo",),
+                tags=("negativo" if s["realizado_periodo"] is not None and s["realizado_periodo"] < 0 else "positivo",),
             )
         fim = self._analise["fim"]
         data_texto = fim.strftime("%d/%m/%Y") if fim else "última operação"

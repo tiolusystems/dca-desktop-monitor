@@ -27,6 +27,14 @@ class FakePriceManager:
     def atualizar_precos(self, moedas): return True
 
 
+def pump(root):
+    import time
+    deadline=time.monotonic()+0.08
+    while time.monotonic()<deadline:
+        root.update()
+        time.sleep(0.01)
+
+
 def main():
     projeto = Path(__file__).resolve().parent.parent
     fixture = projeto / "tests" / "fixtures" / "preview_operacoes.csv"
@@ -61,7 +69,7 @@ def main():
         ])
         assert "venda superior" in dm.ultimo_erro
         assert dm.carregar_operacoes_precisas() == anterior
-        assert not dm.excluir_operacao(0), "Remover o aporte deve invalidar compras."
+        assert not dm.excluir_operacao(0, motivo="Justificativa sintética do teste"), "Remover o aporte deve invalidar compras."
         assert "saldo USDT negativo" in dm.ultimo_erro
         assert dm.carregar_operacoes_precisas() == anterior
         print("GUI_FIN03_VALIDACAO_E_ROLLBACK=PASS")
@@ -71,13 +79,23 @@ def main():
         try:
             root.geometry("1550x900")
             app = entry["PortfolioDCA"](root, dm, FakePriceManager())
+            # Manual quote scenarios below must not be overwritten by the
+            # automatic 1200ms initial sync with DIFFERENT fake price inputs.
+            # Refresh/concurrency behavior is exercised explicitly later.
+            if app._initial_refresh_id is not None:
+                root.after_cancel(app._initial_refresh_id)
+                app._initial_refresh_id = None
+            app._countdown_ativo = False
+            if app._after_id is not None:
+                root.after_cancel(app._after_id)
+                app._after_id = None
             root.update_idletasks()
-            root.update()
+            pump(root)
             tab = app.tabview.tab("📊  Análise por Período")
             assert tab.winfo_exists(), "Aba de análise financeira não foi montada."
             app.aba_analise.atualizar()
             root.update_idletasks()
-            root.update()
+            pump(root)
             cards = app.aba_analise._indicadores
             assert len(cards) == 6, f"Indicadores ausentes: {list(cards)}"
             assert "1,750" in cards["compras_historicas"].cget("text")
@@ -99,7 +117,7 @@ def main():
             assert "2,180.00" in ui._historico_valores.cget("text")
             janela_detalhes = ui._detalhar_ativos_na_data()
             root.update_idletasks()
-            root.update()
+            pump(root)
             linhas = [
                 ui._detalhes_tabela.item(item)["values"]
                 for item in ui._detalhes_tabela.get_children()
@@ -130,7 +148,7 @@ def main():
                 portfolio_sem_eth, None, dist_sem_eth, 5.1
             )
             root.update_idletasks()
-            root.update()
+            pump(root)
             dash = app.aba_distribuicao
             assert dash._lbl_patrimonio.cget("text") == "Indisponível"
             assert dash._lbl_pl_nr.cget("text") == "Indisponível"
@@ -155,7 +173,7 @@ def main():
                 5.1,
             )
             root.update_idletasks()
-            root.update()
+            pump(root)
             assert "Indisponível" not in dash._lbl_patrimonio.cget("text")
             # FIN-04: USDC does not finance USDT, and is not a 1:1 asset.
             assert dm.salvar_operacao([
@@ -180,7 +198,7 @@ def main():
             )
             dash._atualizar_ui(carteira, None, distribuicao, 5.1)
             root.update_idletasks()
-            root.update()
+            pump(root)
             assert carteira["totais"]["valor_atual"] == 2623
             assert "2,623" in dash._lbl_patrimonio.cget("text")
             assert dash._lbl_pl_nr.cget("text") == "Indisponível"
@@ -214,7 +232,7 @@ def main():
             with patch.object(entry["threading"], "Thread", ThreadDireta):
                 app.atualizar_todas_as_analises()
             root.update_idletasks()
-            root.update()
+            pump(root)
             assert False in chamadas_refresh, chamadas_refresh
             app._atualizar_abas_seguro = original_refresh
             app.price_manager.atualizar_precos = original_preco
@@ -264,7 +282,7 @@ def main():
             dash.display_currency = "BRL"
             dash._atualizar_ui(portfolio_audit, None, dist_audit, 5.10, audit)
             root.update_idletasks()
-            root.update()
+            pump(root)
             assert dash._lbl_retorno.cget("text") == "+10.00%"
             assert "100.00 USDT" in dash._lbl_pl_r.cget("text")
             assert "100.00 USDT" in dash._lbl_pl.cget("text")
@@ -278,7 +296,7 @@ def main():
             root.state("normal")
             root.geometry("980x700+5+5")
             root.update_idletasks()
-            root.update()
+            pump(root)
             dash = app.aba_distribuicao
             canvas = dash._det_canvas
             assert canvas.winfo_width() >= 250, canvas.winfo_width()
@@ -288,7 +306,7 @@ def main():
             assert len(dash._det_rows[0]._labels) == 10
             assert dash._det_rows[0]._labels[9].winfo_width() >= 90
             canvas.xview_moveto(1.0)
-            root.update()
+            pump(root)
             assert canvas.xview()[0] > 0.10, canvas.xview()
             assert canvas.winfo_width() < dash._det_rows[0].winfo_width()
             print("GUI_UI01_DASHBOARD_HORIZONTAL=PASS")
@@ -303,10 +321,10 @@ def main():
             assert "1,680.00" in analise._historico_cards["caixa_usdt"].cget("text")
             assert analise._historico_valores.cget("wraplength") <= 900
             scroll = analise._conteudo_rolavel._parent_canvas
-            root.update()
+            pump(root)
             assert scroll.yview()[1] < 1.0, scroll.yview()
             scroll.yview_moveto(1.0)
-            root.update()
+            pump(root)
             assert scroll.yview()[0] > 0.0, scroll.yview()
             assert analise._arvore.winfo_exists()
             print("GUI_UI01_ANALYSIS_SCROLL_AND_CARDS=PASS")
@@ -324,22 +342,51 @@ def main():
 
             app.tabview.set("✏️  Registrar Operação")
             root.update_idletasks()
-            root.update()
+            pump(root)
             form_scroller = app.aba_registro._scroll_registro._parent_canvas
             assert app.aba_registro._btn_salvar.winfo_exists()
             form_scroller.yview_moveto(1.0)
-            root.update()
+            pump(root)
             assert form_scroller.yview()[0] > 0.0, form_scroller.yview()
             print("GUI_UI01_OPERACAO_CONFIRMACAO_ACESSIVEL=PASS")
 
             app.tabview.set("💰  Caixa (USD/BRL)")
             root.update_idletasks()
-            root.update()
+            pump(root)
             extrato = app.aba_caixa.tree
             assert app.aba_caixa._extrato_scroll_horizontal.winfo_exists()
             for coluna in ("Data", "Tipo", "Descrição", "Saldo Atualizado"):
                 assert extrato.column(coluna)["minwidth"] >= 150
             print("GUI_UI01_CAIXA_COLUNAS_PRESERVADAS=PASS")
+
+            # F15/F17: exercise the REAL editor, not only persistence helpers.
+            from unittest.mock import patch
+            precise_fx="5.23456789123456789"
+            editor=app.aba_edicao
+            editor._indice_editando=None
+            editor._renderizar_tree(list(enumerate(dm.carregar_operacoes())))
+            item=next(key for key,index in editor._mapa_indices.items() if index==0)
+            editor._tree.selection_set(item)
+            editor._carregar_transacao()
+            original=dm.carregar_operacao_para_edicao(0)
+            editor._campos['Taxa_BRL'].delete(0,'end')
+            editor._campos['Taxa_BRL'].insert(0,precise_fx)
+            with patch('gui.janela_edicao.simpledialog.askstring',return_value='Comprovante sintético do smoke'), patch('gui.janela_edicao.messagebox.showinfo'):
+                editor._salvar_edicao()
+            edited=dm.carregar_operacao_para_edicao(0)
+            assert edited['Taxa_BRL']==precise_fx,edited
+            assert edited['Quantidade']==original['Quantidade']
+            assert dm._store.listar_auditoria_operacoes()[-1]['motivo']=='Comprovante sintético do smoke'
+            assert dm.atualizar_operacao(0,original,motivo='Reverter apenas o cenário sintético')
+            pump(root)
+            print('GUI_F15_F17_EDICAO_PRECISA_E_AUDITADA=PASS')
+            # F06/F07: a closed asset with unknown realized basis must render.
+            dash._inserir_detalhe('BTC',dict(quantidade_final=0,pmc_final=0,
+                custo_posicao_final=0,preco_de_mercado=100,valor_atual_posicao=0,
+                lucro_nao_realizado=0,lucro_realizado=None,lucro_total=None,
+                total_comprado_usdt=100),0)
+            assert dash._det_rows[0]._labels[7].cget('text')=='Indisponível'
+            print('GUI_F06_RESULTADO_DESCONHECIDO=PASS')
 
             # OPS-01: startup does not perform a Binance request. Use
             # the actual splash boot procedure without creating a second UI.
@@ -378,7 +425,7 @@ def main():
                 first_win, new_db, lambda: None, lambda: None
             )
             first_ui.pack(fill="both", expand=True)
-            root.update()
+            pump(root)
             assert first_ui._externo_flag.get() is False
             first_ui._externo_flag.set(True)
             assert first_ui._externo_flag.get()
@@ -387,7 +434,7 @@ def main():
                 data_posicao="2026-09-30",confirmacao_independente=True,
             )
             first_ui.atualizar()
-            root.update()
+            pump(root)
             assert "EXTERNOS AO CSV" in first_ui._posicoes.cget("text")
             assert "Cold wallet" in first_ui._posicoes.cget("text")
             assert new_db.carregar_operacoes_precisas() == []
@@ -396,13 +443,46 @@ def main():
             assert first_ui._tipo_movimento.get() == "transferencia"
             print("GUI_CUST01_MOVIMENTACAO_EXTERNAS=PASS")
 
+            # F04: actual form keeps a command across double callbacks and
+            # retries; another real event needs explicit "Nova movimentação".
+            values = {
+                "Ativo movimentado":"BTC", "Origem (custódia)":"Cold wallet",
+                "Destino (custódia/USDT)":"Exchange A",
+                "Quantidade enviada/vendida":"0.005", "Taxa cobrada no ativo":"0",
+                "Receita bruta em USDT":"0", "Corretagem em USDT":"0",
+                "Data do movimento":"2026-10-01",
+                "Justificativa/comprovante":"Synthetic F04 Windows document",
+            }
+            for key,value in values.items():
+                first_ui._mov_campos[key].delete(0,"end")
+                first_ui._mov_campos[key].insert(0,value)
+            command_id = first_ui._movimento_id
+            def confirm_with_double_callback(*args, **kwargs):
+                first_ui._salvar_movimento()
+                return True
+            with patch("gui.janela_primeiro_uso.messagebox.askyesno",
+                       side_effect=confirm_with_double_callback):
+                first_ui._salvar_movimento()
+            first_ui._salvar_movimento()
+            assert len(new_db.carregar_movimentos_custodia()) == 1
+            assert first_ui._movimento_confirmado
+            assert first_ui._btn_movimento.cget("state") == "disabled"
+            assert first_ui._movimento_id == command_id
+            first_ui._nova_movimentacao()
+            assert first_ui._movimento_id != command_id
+            with patch("gui.janela_primeiro_uso.messagebox.askyesno", return_value=True):
+                first_ui._salvar_movimento()
+            assert len(new_db.carregar_movimentos_custodia()) == 2
+            assert not new_db.carregar_operacoes_precisas()
+            print("GUI_F04_IDEMPOTENCIA_E_EVENTOS_IGUAIS=PASS")
+
             first_win.destroy()
             print("GUI_PRE01_CUSTODIA_EXTERNA_SEM_COMPRA=PASS")
 
             # DIST/OPS: settings are real desktop controls, not new dashboard tabs.
             app._abrir_configuracoes()
             root.update_idletasks()
-            root.update()
+            pump(root)
             settings=app._janela_aplicativo
             assert settings.winfo_exists()
             assert settings._btn_instalar.cget("state") == "disabled"
@@ -439,6 +519,8 @@ def main():
             assert app._closing is False
             app._on_closing()
             assert app._closing and not app._countdown_ativo
+            assert app.aba_caixa._tasks.closed and app.aba_distribuicao._tasks.closed
+            assert app.aba_edicao._tasks.closed
             assert app._after_id is None and app._initial_refresh_id is None
             assert app.atualizar_todas_as_analises() is False
             assert app._agendar_ui(lambda: 1 / 0) is False
@@ -459,4 +541,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from gui_error_guard import install, verify
+    install()
     main()
+    verify()

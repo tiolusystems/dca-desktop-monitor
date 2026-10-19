@@ -6,13 +6,17 @@ import hashlib
 import json
 import io
 import os
+import re
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from contextlib import closing
 from decimal import Decimal, InvalidOperation
+
+SCHEMA_VERSION = 10
 
 COLUNAS = ("Data", "Moeda", "Operacao", "Valor_USDT", "Preco", "Quantidade", "Taxa_BRL")
 CAMPO_FEE = "Taxa_Corretagem_USDT"
@@ -122,7 +126,31 @@ class ArmazemSQLite:
         self.diretorio.mkdir(parents=True, exist_ok=True)
         self.arquivo_legado = Path(arquivo_legado).expanduser().resolve() if arquivo_legado else None
         self.arquivo_db = self.diretorio / "portfolio.sqlite3"
+        if (self.diretorio / "RECOVERY-INCOMPLETE").exists():
+            raise ErroArmazenamento("Recuperação incompleta; não abrir este diretório.")
+        marker = self.diretorio / "data-identity.json"
+        if not self.arquivo_db.exists() and (
+            marker.exists() or any((self.diretorio / "backups").glob("**/*"))
+            or any(self.diretorio.glob("portfolio.sqlite3-*"))
+        ):
+            raise ErroArmazenamento(
+                "SQLite anteriormente utilizado está ausente. Inicie a manutenção "
+                "de recuperação; não criar carteira vazia de substituição."
+            )
+        marker_info = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
+        if marker_info.get("uuid") and self.arquivo_db.is_file():
+            with closing(sqlite3.connect(self.arquivo_db.as_uri()+"?mode=ro",uri=True)) as conn:
+                actual=conn.execute("SELECT uuid FROM identidade_carteira WHERE id=1").fetchone()
+            if actual is None or actual[0] != marker_info["uuid"]:
+                raise ErroArmazenamento("O banco pertence a outra carteira; recuperação bloqueada.")
         self._inicializar()
+        with closing(self._conectar()) as conn:
+            wallet_uuid = conn.execute("SELECT uuid FROM identidade_carteira WHERE id=1").fetchone()[0]
+        if marker_info.get("uuid") != wallet_uuid:
+            with marker.open("w", encoding="utf-8") as out:
+                json.dump({"formato":"DCA-DATA-IDENTITY-1", "banco":self.arquivo_db.name,"uuid":wallet_uuid},out)
+                out.flush()
+                os.fsync(out.fileno())
         if (auto_importar_legado and self.arquivo_legado is not None
                 and self.arquivo_legado.is_file()):
             self.importar_csv(self.arquivo_legado)
@@ -140,19 +168,42 @@ class ArmazemSQLite:
             raise
 
     def _inicializar(self):
+        if self.arquivo_db.exists() and self.arquivo_db.stat().st_size == 0:
+            raise ErroArmazenamento("SQLite existente vazio/corrompido; use manutenção, não criar carteira substituta.")
         # Schema migrations require a verifiable snapshot BEFORE any ALTER.
         if self.arquivo_db.is_file() and self.arquivo_db.stat().st_size:
             with closing(sqlite3.connect(self.arquivo_db.as_uri() + "?mode=ro", uri=True)) as verify:
                 version = verify.execute("PRAGMA user_version").fetchone()[0]
             if version < 6:
+                raise ErroArmazenamento("Schema anterior à base validada v6; requer migração assistida sem inicialização silenciosa.")
+            if version > SCHEMA_VERSION:
+                raise ErroArmazenamento("Banco de versão futura incompatível; nenhuma migração executada.")
+            if version == SCHEMA_VERSION:
+                from backend.database_identity import validar_banco_dca
+                validar_banco_dca(self.arquivo_db)
+            else:
+                # Never initialize an arbitrary or damaged existing SQLite as DCA.
+                from backend.database_identity import REQUIRED
+                with closing(sqlite3.connect(self.arquivo_db.as_uri()+"?mode=ro",uri=True)) as verify:
+                    for table, columns in REQUIRED.items():
+                        introduced={"identidade_carteira":8,"auditoria_operacoes":9,
+                                    "versoes_resultados":10}.get(table,6)
+                        if version < introduced:
+                            continue
+                        required = columns - ({"comando_id"} if version < 7 else set())
+                        actual={r[1] for r in verify.execute("PRAGMA table_info("+table+")")}
+                        if not required <= actual:
+                            raise ErroArmazenamento("Estrutura DCA anterior inválida: "+table)
+            if version < SCHEMA_VERSION:
                 from backend.backup_sqlite import criar_backup_sqlite
                 criar_backup_sqlite(
                     self.arquivo_db, self.diretorio / "backups" / "sqlite",
-                    motivo=f"antes_schema_v{version}_para_v6",
+                    motivo=f"antes_schema_v{version}_para_v{SCHEMA_VERSION}",
                 )
         conn = self._conectar()
         try:
             conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute("""CREATE TABLE IF NOT EXISTS operacoes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 data TEXT NOT NULL, moeda TEXT NOT NULL, operacao TEXT NOT NULL,
@@ -221,7 +272,35 @@ class ArmazemSQLite:
                 observacao TEXT NOT NULL,
                 criado_em_utc TEXT NOT NULL
             )""")
-            conn.execute("PRAGMA user_version=6")
+            # F04: old rows have no documented command identity. Do not infer
+            # one from amounts/dates, which may legitimately be identical.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(movimentacoes_custodia)")}
+            if "comando_id" not in cols:
+                conn.execute("ALTER TABLE movimentacoes_custodia ADD COLUMN comando_id TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_custodia_comando "
+                "ON movimentacoes_custodia(comando_id) WHERE comando_id IS NOT NULL"
+            )
+            conn.execute("CREATE TABLE IF NOT EXISTS identidade_carteira (id INTEGER PRIMARY KEY CHECK(id=1), uuid TEXT NOT NULL UNIQUE)")
+            conn.execute("INSERT OR IGNORE INTO identidade_carteira VALUES (1,?)", (str(uuid4()),))
+            conn.execute("""CREATE TABLE IF NOT EXISTS auditoria_operacoes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, operacao_id INTEGER NOT NULL,
+                acao TEXT NOT NULL, antes_json TEXT, depois_json TEXT, motivo TEXT NOT NULL,
+                operador TEXT NOT NULL, alterado_em_utc TEXT NOT NULL)""")
+            for action in ("UPDATE","DELETE"):
+                conn.execute(f"CREATE TRIGGER IF NOT EXISTS auditoria_operacoes_no_{action} BEFORE {action} ON auditoria_operacoes BEGIN SELECT RAISE(ABORT,'Auditoria imutável'); END")
+            conn.execute("""CREATE TABLE IF NOT EXISTS versoes_resultados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, identidade TEXT NOT NULL UNIQUE,
+                data_utc TEXT NOT NULL, regras TEXT NOT NULL, insumos_json TEXT NOT NULL,
+                resultado_json TEXT NOT NULL, emitido_em_utc TEXT NOT NULL)""")
+            for action in ("UPDATE", "DELETE"):
+                conn.execute(f"CREATE TRIGGER IF NOT EXISTS versoes_resultados_no_{action} BEFORE {action} ON versoes_resultados BEGIN SELECT RAISE(ABORT,'Versão emitida imutável'); END")
+            conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            conn.execute("COMMIT")
+        except Exception:
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
+            raise
         finally:
             conn.close()
 
@@ -375,46 +454,31 @@ class ArmazemSQLite:
                 "backup_sqlite": snapshot_path, "aviso_backup_sqlite": aviso,
                 "banco": str(self.arquivo_db)}
 
-    def informar_custo_inicial(self, moeda: str, custodia: str,
-                              custo_total_usdt: str) -> dict:
-        try:
-            custo = Decimal(str(custo_total_usdt))
-        except (InvalidOperation, ValueError, TypeError) as exc:
-            raise ErroArmazenamento("Custo total inválido.") from exc
-        if not custo.is_finite() or custo <= 0:
-            raise ErroArmazenamento("Informe custo total positivo e documentado em USDT.")
-        con = self._conectar()
-        try:
-            con.execute("BEGIN IMMEDIATE")
-            row = con.execute(
-                "SELECT id FROM posicoes_iniciais WHERE moeda=? AND custodia=?",
-                (moeda.strip().upper(), custodia.strip()),
-            ).fetchone()
-            if row is None:
-                raise ErroArmazenamento("Saldo inicial não encontrado.")
-            con.execute(
-                "UPDATE posicoes_iniciais SET custo_total_usdt=? WHERE id=?",
-                (str(custo), row[0]),
-            )
-            con.execute("COMMIT")
-        except Exception:
-            if con.in_transaction:
-                con.execute("ROLLBACK")
-            raise
-        finally:
-            con.close()
+    def informar_custo_inicial(self, moeda, custodia, custo_total_usdt, *, motivo=None):
+        # Compatibility entry point follows the same audited financial replay.
+        motivo = self._motivo_alteracao(motivo)
+        row = next((r for r in self.listar_posicoes_iniciais()
+                    if r["Moeda"] == moeda.upper() and r["Custodia"] == custodia), None)
+        if row is None:
+            raise ErroArmazenamento("Saldo inicial não encontrado.")
+        return self.corrigir_posicao(origem="inicial", moeda=moeda, custodia=custodia,
+            quantidade=row["Quantidade"], custo_total_usdt=custo_total_usdt, motivo=motivo)
 
-        try:
-            from backend.backup_sqlite import criar_backup_sqlite
-            snapshot = criar_backup_sqlite(
-                self.arquivo_db, self.diretorio / "backups" / "sqlite",
-                motivo="depois_custo_inicial",
-            )
-            return {"gravado": True, "backup_sqlite": snapshot["manifesto"],
-                    "aviso_backup_sqlite": None}
-        except Exception as exc:
-            return {"gravado": True, "backup_sqlite": None,
-                    "aviso_backup_sqlite": "Custo registrado, mas backup falhou: " + str(exc)}
+    def registrar_versao_resultado(self, data_utc, insumos, resultado):
+        regras = "DCA-F01-F17-v1; reexpressão atual preservada; sem decisão fiscal"
+        encode = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                         separators=(",", ":"), default=str)
+        inputs, output = encode(insumos), encode(resultado)
+        identity = hashlib.sha256(encode([data_utc, regras, inputs, output]).encode()).hexdigest()
+        with closing(self._conectar()) as conn:
+            conn.execute("INSERT OR IGNORE INTO versoes_resultados (identidade,data_utc,regras,insumos_json,resultado_json,emitido_em_utc) VALUES (?,?,?,?,?,?)",
+                (identity,data_utc,regras,inputs,output,datetime.now(timezone.utc).isoformat()))
+        return identity
+
+    def listar_versoes_resultados(self):
+        with closing(self._conectar()) as conn:
+            rows=conn.execute("SELECT identidade,data_utc,regras,insumos_json,resultado_json,emitido_em_utc FROM versoes_resultados ORDER BY id").fetchall()
+        return [dict(identidade=r[0],data_utc=r[1],regras=r[2],insumos=json.loads(r[3]),resultado=json.loads(r[4]),emitido_em_utc=r[5]) for r in rows]
 
     @staticmethod
     def _validar_lote(moeda, quantidade, custodia, data_posicao, custo_total_usdt):
@@ -540,11 +604,11 @@ class ArmazemSQLite:
     def _movimentos_transacionais(conn) -> list[dict]:
         rows = conn.execute(
             "SELECT id,data_utc,tipo,moeda,origem,destino,quantidade,"
-            "taxa_ativo,receita_usdt,taxa_usdt,observacao "
+            "taxa_ativo,receita_usdt,taxa_usdt,observacao,comando_id "
             "FROM movimentacoes_custodia ORDER BY id"
         ).fetchall()
         campos=("ID","Data","Tipo","Moeda","Origem","Destino",
-                "Quantidade","Taxa_Ativo","Receita_USDT","Taxa_USDT","Observacao")
+                "Quantidade","Taxa_Ativo","Receita_USDT","Taxa_USDT","Observacao","Comando_ID")
         return [dict(zip(campos,row)) for row in rows]
 
     @staticmethod
@@ -568,9 +632,13 @@ class ArmazemSQLite:
     def registrar_movimento_custodia(
         self, *, tipo:str, moeda:str, origem:str, destino:str, quantidade:str,
         data_utc:str, taxa_ativo:str, receita_usdt:str, taxa_usdt:str,
-        observacao:str,
+        observacao:str, comando_id:str | None = None,
     ) -> dict:
-        """Append immutable transfer/disposal, validate complete replay under lock."""
+        """Post once per command; callers must reuse its ID on retries.
+
+        Omitting the ID starts a new independent command for compatibility.
+        Identical financial values never establish identity on their own.
+        """
         from backend.custody_ledger import numero, apurar_custodia, ErroMovimentacaoCustodia
         tipo=tipo.strip().lower()
         ativo=moeda.strip().upper()
@@ -598,6 +666,9 @@ class ArmazemSQLite:
             raise ErroArmazenamento("Transferência sem receita/corretagem USDT e entre locais distintos.")
         if tipo=="venda" and (ativo=="USDT" or revenue<=fee_dollar):
             raise ErroArmazenamento("Venda requer receita líquida positiva em USDT.")
+        command = str(uuid4()) if comando_id is None else comando_id
+        if not isinstance(command, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", command):
+            raise ErroArmazenamento("Identidade do comando inválida (1 a 128 caracteres).")
         row={
             "Data":dia.isoformat(),"Tipo":tipo,"Moeda":ativo,
             "Origem":origem,"Destino":destino,"Quantidade":str(quant),
@@ -608,6 +679,27 @@ class ArmazemSQLite:
         con=self._conectar()
         try:
             con.execute("BEGIN IMMEDIATE")
+            existing = con.execute(
+                "SELECT id,data_utc,tipo,moeda,origem,destino,quantidade,"
+                "taxa_ativo,receita_usdt,taxa_usdt,observacao "
+                "FROM movimentacoes_custodia WHERE comando_id=?", (command,),
+            ).fetchone()
+            if existing is not None:
+                previous = dict(zip(
+                    ("ID","Data","Tipo","Moeda","Origem","Destino","Quantidade",
+                     "Taxa_Ativo","Receita_USDT","Taxa_USDT","Observacao"), existing,
+                ))
+                previous["Data"] = previous["Data"][:10]
+                numeric = {"Quantidade", "Taxa_Ativo", "Receita_USDT", "Taxa_USDT"}
+                if any((Decimal(previous[k]) != Decimal(v) if k in numeric
+                        else previous[k] != v) for k,v in row.items()):
+                    raise ErroArmazenamento(
+                        "Este comando já foi registrado com dados diferentes. "
+                        "Uma nova movimentação real precisa de outra identidade."
+                    )
+                con.execute("COMMIT")
+                return {**previous, "Comando_ID":command, "registrado_agora":False,
+                        "backup_sqlite":None, "aviso_backup_sqlite":None}
             opens=self._externos_transacionais(con)
             if not opens:
                 raise ErroArmazenamento("Não existem saldos externos para movimentar.")
@@ -644,16 +736,17 @@ class ArmazemSQLite:
             # both respect the declaration date of each external position.
             apurar_custodia(opens,earlier+[row],ate=dia)
             apurar_custodia(opens,earlier+[row])
-            con.execute(
+            cursor = con.execute(
                 "INSERT INTO movimentacoes_custodia "
                 "(data_utc,tipo,moeda,origem,destino,quantidade,taxa_ativo,"
-                "receita_usdt,taxa_usdt,observacao,criado_em_utc) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "receita_usdt,taxa_usdt,observacao,criado_em_utc,comando_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (row["Data"],tipo,ativo,origem,destino,
                  row["Quantidade"],row["Taxa_Ativo"],row["Receita_USDT"],
                  row["Taxa_USDT"],row["Observacao"],
-                 datetime.now(timezone.utc).isoformat())
+                 datetime.now(timezone.utc).isoformat(),command)
             )
+            movimento_id = cursor.lastrowid
             con.execute("COMMIT")
         except Exception:
             if con.in_transaction:
@@ -670,7 +763,8 @@ class ArmazemSQLite:
             aviso,manifest=None,snapshot["manifesto"]
         except Exception as exc:
             aviso,manifest="Movimentação salva, backup posterior falhou: "+str(exc),None
-        return {**row,"backup_sqlite":manifest,"aviso_backup_sqlite":aviso}
+        return {**row,"ID":movimento_id,"Comando_ID":command,"registrado_agora":True,
+                "backup_sqlite":manifest,"aviso_backup_sqlite":aviso}
 
     def corrigir_posicao(
         self, *, origem: str, moeda: str, custodia: str,
@@ -938,6 +1032,14 @@ class ArmazemSQLite:
             return {"consistente": False, "erro": str(exc), "registros": len(historico)}
         return {"consistente": True, "erro": None, "registros": len(historico)}
 
+    def _apos_gravacao(self):
+        self.ultimo_aviso_backup = None
+        try:
+            from backend.backup_policy import proteger_gravacao
+            proteger_gravacao(self.arquivo_db)
+        except Exception as exc:
+            self.ultimo_aviso_backup = "Gravação confirmada; cópia de segurança pendente: " + str(exc)
+
     def inserir(self, valores: list) -> bool:
         if len(valores) not in (len(COLUNAS), len(COLUNAS_EXPORTACAO)):
             raise ErroArmazenamento("Quantidade incorreta de campos.")
@@ -951,6 +1053,7 @@ class ArmazemSQLite:
             validar_livro(livro + [row], self._saldos_transacionais(con))
             self._inserir(con, row)
             con.execute("COMMIT")
+            self._apos_gravacao()
             return True
         except Exception:
             if con.in_transaction:
@@ -959,7 +1062,28 @@ class ArmazemSQLite:
         finally:
             con.close()
 
-    def substituir(self, indice: int, valores: dict) -> bool:
+    @staticmethod
+    def _auditar_operacao(con, codigo, acao, antes, depois, motivo):
+        import getpass
+        con.execute("INSERT INTO auditoria_operacoes (operacao_id,acao,antes_json,depois_json,motivo,operador,alterado_em_utc) VALUES (?,?,?,?,?,?,?)",
+            (codigo,acao,json.dumps(antes,ensure_ascii=False) if antes is not None else None,
+             json.dumps(depois,ensure_ascii=False) if depois is not None else None,
+             motivo,getpass.getuser(),datetime.now(timezone.utc).isoformat()))
+
+    def listar_auditoria_operacoes(self):
+        with closing(self._conectar()) as conn:
+            rows=conn.execute("SELECT operacao_id,acao,antes_json,depois_json,motivo,operador,alterado_em_utc FROM auditoria_operacoes ORDER BY id").fetchall()
+        return [{"operacao_id":r[0],"acao":r[1],"antes":json.loads(r[2]) if r[2] else None,
+                 "depois":json.loads(r[3]) if r[3] else None,"motivo":r[4],"operador":r[5],"data":r[6]} for r in rows]
+
+    @staticmethod
+    def _motivo_alteracao(motivo):
+        if not isinstance(motivo,str) or not 8<=len(motivo.strip())<=500:
+            raise ErroArmazenamento("Motivo documentado obrigatório (8 a 500 caracteres).")
+        return motivo.strip()
+
+    def substituir(self, indice: int, valores: dict, *, motivo=None) -> bool:
+        motivo=self._motivo_alteracao(motivo)
         row = _validar(valores, indice + 2)
         self._conferir_origem()
         con = self._conectar()
@@ -977,13 +1101,16 @@ class ArmazemSQLite:
                     "A moeda de uma operação existente não pode ser alterada. "
                     "Exclua e registre novamente após verificar os saldos."
                 )
+            anterior=dict(livro[indice])
             livro[indice] = row
             validar_livro(livro, self._saldos_transacionais(con))
             con.execute(
                 "UPDATE operacoes SET data=?, moeda=?, operacao=?, valor_usdt=?, "
                 "preco=?, quantidade=?, taxa_brl=?, taxa_corretagem_usdt=? WHERE id=?",
                 tuple(row[campo] for campo in COLUNAS) + (row.get(CAMPO_FEE), id_operacao,))
+            self._auditar_operacao(con,id_operacao,"alteracao",anterior,row,motivo)
             con.execute("COMMIT")
+            self._apos_gravacao()
             return True
         except Exception:
             if con.in_transaction:
@@ -992,7 +1119,8 @@ class ArmazemSQLite:
         finally:
             con.close()
 
-    def excluir(self, indice: int) -> bool:
+    def excluir(self, indice: int, *, motivo=None) -> bool:
+        motivo=self._motivo_alteracao(motivo)
         self._conferir_origem()
         con = self._conectar()
         try:
@@ -1003,10 +1131,13 @@ class ArmazemSQLite:
                 return False
             from backend.operation_integrity import validar_livro
             livro = self._livro_transacional(con)
+            anterior=dict(livro[indice])
             del livro[indice]
             validar_livro(livro, self._saldos_transacionais(con))
             con.execute("DELETE FROM operacoes WHERE id=?", (id_operacao,))
+            self._auditar_operacao(con,id_operacao,"exclusao",anterior,None,motivo)
             con.execute("COMMIT")
+            self._apos_gravacao()
             return True
         except Exception:
             if con.in_transaction:
@@ -1076,6 +1207,7 @@ class ArmazemSQLite:
                 )
                 inseridos += 1
             con.execute("COMMIT")
+            self._apos_gravacao()
             return inseridos
         except Exception:
             if con.in_transaction:

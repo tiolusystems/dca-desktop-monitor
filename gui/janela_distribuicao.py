@@ -1,3 +1,4 @@
+from backend.ui_dispatch import UiDispatcher
 import tkinter as tk
 from tkinter import messagebox
 import threading
@@ -49,6 +50,7 @@ class JanelaDistribuicao(ctk.CTkFrame):
 
     def __init__(self, parent, data_manager, price_manager, analysis_engine, on_change=None):
         super().__init__(parent, fg_color="transparent")
+        self._tasks = UiDispatcher(self)
 
         self._data_manager  = data_manager
         self._price_manager = price_manager
@@ -310,7 +312,7 @@ class JanelaDistribuicao(ctk.CTkFrame):
 
     def atualizar(self):
         self.set_status("🔄 Calculando P&L...", CYAN)
-        threading.Thread(target=self._worker_atualizar, daemon=True).start()
+        self._tasks.run(self._worker_atualizar)
 
     def _worker_atualizar(self):
         try:
@@ -319,7 +321,7 @@ class JanelaDistribuicao(ctk.CTkFrame):
             externos = self._data_manager.carregar_posicoes_externas()
             movimentos = self._data_manager.carregar_movimentos_custodia()
             if not ops and not iniciais and not externos:
-                self.after(0, self._ui_vazia)
+                self._tasks.post(self._ui_vazia)
                 return
             preco_mgr = self._price_manager
             precos = (preco_mgr.precos_para_avaliacao()
@@ -345,12 +347,12 @@ class JanelaDistribuicao(ctk.CTkFrame):
                 saldos_externos=externos,
                 movimentos_custodia=movimentos,
             )
-            self.after(0, lambda: self._atualizar_ui(
+            self._tasks.post(lambda: self._atualizar_ui(
                 portfolio, usdt_pl, dist, taxa, auditoria,
             ))
         except Exception as e:
-            self.after(0, lambda: self.set_status("❌ Falha no processamento", NEON_RED))
-            self.after(0, lambda: messagebox.showerror("Exceção do Engine", str(e)))
+            self._tasks.post(lambda: self.set_status("❌ Falha no processamento", NEON_RED))
+            self._tasks.post(lambda error=str(e): messagebox.showerror("Exceção do Engine", error))
 
     def _ui_vazia(self):
         self._limpar_det_rows()
@@ -458,7 +460,7 @@ class JanelaDistribuicao(ctk.CTkFrame):
         tot_val = resumo.get("valor_atual")
         tot_pl_nr = resumo.get("nao_realizado")
         tot_pl_r = resumo.get("realizado", 0)
-        tot_pl = None if tot_pl_nr is None else tot_pl_nr + tot_pl_r
+        tot_pl = None if tot_pl_nr is None or tot_pl_r is None else tot_pl_nr + tot_pl_r
         pct_nr = (
             tot_pl_nr / tot_custo * 100 if tot_pl_nr is not None
             and tot_custo > 0.000001 else None
@@ -469,7 +471,7 @@ class JanelaDistribuicao(ctk.CTkFrame):
         pct_total = float(retorno_estimado) if retorno_estimado is not None else None
         cor_pl = TEXT_MUTED if tot_pl is None else NEON_GREEN if tot_pl >= 0 else NEON_RED
         cor_nr = TEXT_MUTED if tot_pl_nr is None else NEON_GREEN if tot_pl_nr >= 0 else NEON_RED
-        cor_r = NEON_GREEN if tot_pl_r >= 0 else NEON_RED
+        cor_r = TEXT_MUTED if tot_pl_r is None else NEON_GREEN if tot_pl_r >= 0 else NEON_RED
         cor_retorno = TEXT_MUTED if pct_total is None else NEON_GREEN if pct_total >= 0 else NEON_RED
 
         self._lbl_patrimonio.configure(text=self._fmt_val(tot_val))
@@ -531,10 +533,10 @@ class JanelaDistribuicao(ctk.CTkFrame):
             str_pct = "Indisponível"
         elif custo is not None and custo > 0.000001:
             str_pct = f"{pl_nr / custo * 100:+.2f}%"
-        elif comprado_hist > 0.000001:
+        elif comprado_hist > 0.000001 and pl_r is not None:
             str_pct = f"{pl_r / comprado_hist * 100:+.2f}%"
         else:
-            str_pct = "—"
+            str_pct = "Não apurado" if pl_r is None else "—"
         bg      = BG_CARD if idx % 2 == 0 else BG_DEEP
 
         if moeda == "USDT (Caixa)":

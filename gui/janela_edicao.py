@@ -1,5 +1,6 @@
+from backend.ui_dispatch import UiDispatcher
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Optional
 import logging
@@ -43,6 +44,7 @@ class JanelaEdicao(ctk.CTkFrame):
         on_change: Optional[Callable] = None,
     ):
         super().__init__(parent, fg_color=BG_SURFACE)
+        self._tasks = UiDispatcher(self)
 
         self._data_manager    = data_manager
         self._price_manager   = price_manager
@@ -295,9 +297,6 @@ class JanelaEdicao(ctk.CTkFrame):
     def atualizar(self) -> None:
         if self._indice_editando is not None:
             return
-        if self._carregando:
-            return
-
         self._carregando = True
         self.lbl_status.configure(text="🔄 Carregando histórico...")
         self.btn_load.configure(state="disabled")
@@ -307,7 +306,7 @@ class JanelaEdicao(ctk.CTkFrame):
         for item in self._tree.get_children():
             self._tree.delete(item)
 
-        threading.Thread(target=self._worker_carregar_dados, daemon=True).start()
+        self._tasks.run(self._worker_carregar_dados)
 
     def _worker_carregar_dados(self) -> None:
         try:
@@ -321,10 +320,10 @@ class JanelaEdicao(ctk.CTkFrame):
                     return datetime.min
 
             ops_com_indice.sort(key=get_data_segura, reverse=True)
-            self.after(0, lambda: self._renderizar_tree(ops_com_indice))
+            self._tasks.post(lambda: self._renderizar_tree(ops_com_indice))
         except Exception as e:
             self._carregando = False
-            self.after(0, lambda: self.lbl_status.configure(text="⚠️ Erro ao carregar", text_color="red"))
+            self._tasks.post(lambda: self.lbl_status.configure(text="⚠️ Erro ao carregar", text_color="red"))
             logger.error(f"Erro no histórico: {e}")
 
     def _renderizar_tree(self, ops_com_indice: list) -> None:
@@ -370,14 +369,14 @@ class JanelaEdicao(ctk.CTkFrame):
         self._indice_editando = self._mapa_indices.get(item)
         valores = self._tree.item(item, "values")
 
-        operacoes = self._data_manager.carregar_operacoes()
-        self._op_original = operacoes[self._indice_editando]
+        self._op_original = self._data_manager.carregar_operacao_para_edicao(self._indice_editando)
 
         self._campo_corretagem.delete(0, "end")
         fee = self._op_original.get("Taxa_Corretagem_USDT")
         if fee is not None and str(fee).strip():
             self._campo_corretagem.insert(0, str(fee))
-        for col, valor in zip(self._data_manager.headers, valores):
+        for col in self._data_manager.headers:
+            valor = self._op_original.get(col, "")
             widget = self._campos[col]
 
             if isinstance(widget, ctk.CTkComboBox):
@@ -390,7 +389,7 @@ class JanelaEdicao(ctk.CTkFrame):
                 widget.configure(state="disabled")
             else:
                 widget.configure(state="normal")
-                valor_fmt = f"{float(valor):.2f}" if col == "Taxa_BRL" and valor != "" else valor
+                valor_fmt = str(valor)
                 widget.delete(0, "end")
                 widget.insert(0, valor_fmt)
 
@@ -406,7 +405,10 @@ class JanelaEdicao(ctk.CTkFrame):
             datetime.strptime(nova_data, "%Y-%m-%d %H:%M:%S")
 
             campo_taxa = self._campos.get("Taxa_BRL")
-            taxa_brl = round(float(campo_taxa.get().strip() or 0), 2) if campo_taxa else self._op_original.get("Taxa_BRL", 0.0)
+            from decimal import Decimal
+            taxa_brl = Decimal(campo_taxa.get().strip() or "0") if campo_taxa else Decimal(str(self._op_original.get("Taxa_BRL", "0")))
+            if not taxa_brl.is_finite():
+                raise ValueError("Câmbio não finito")
 
             if taxa_brl != 0 and taxa_brl <= 1.1:
                 messagebox.showerror(
@@ -428,12 +430,15 @@ class JanelaEdicao(ctk.CTkFrame):
                 else:
                     nova_op[col] = widget.get().strip()
 
-            nova_op["Taxa_BRL"] = taxa_brl
+            nova_op["Taxa_BRL"] = str(taxa_brl)
             taxa_usdt = self._campo_corretagem.get().strip()
             nova_op["Taxa_Corretagem_USDT"] = taxa_usdt or None
 
-            if self._data_manager.atualizar_operacao(self._indice_editando, nova_op):
+            motivo=simpledialog.askstring("Motivo da alteração","Descreva o motivo documentado (8 a 500 caracteres):",parent=self)
+            if motivo is None:return
+            if self._data_manager.atualizar_operacao(self._indice_editando, nova_op,motivo=motivo):
                 messagebox.showinfo("Sucesso", "Transação atualizada com sucesso!")
+                self._avisar_backup()
                 self._indice_editando = None
                 self._op_original     = None
                 self._on_change()
@@ -457,8 +462,11 @@ class JanelaEdicao(ctk.CTkFrame):
             return
 
         if messagebox.askyesno("Confirmar", "Tem certeza que deseja excluir?"):
-            if self._data_manager.excluir_operacao(self._indice_editando):
+            motivo=simpledialog.askstring("Motivo da exclusão","Descreva o motivo documentado (8 a 500 caracteres):",parent=self)
+            if motivo is None:return
+            if self._data_manager.excluir_operacao(self._indice_editando,motivo=motivo):
                 messagebox.showinfo("Sucesso", "Excluído com sucesso!")
+                self._avisar_backup()
                 self._indice_editando = None
                 self._op_original     = None
                 self._on_change()
@@ -485,3 +493,6 @@ class JanelaEdicao(ctk.CTkFrame):
                 widget.delete(0, "end")
         self._indice_editando = None
         self._op_original     = None
+    def _avisar_backup(self):
+        aviso=getattr(self._data_manager,"ultimo_aviso_backup",None)
+        if aviso:messagebox.showwarning("Gravação confirmada — backup pendente",aviso,parent=self)

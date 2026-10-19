@@ -1,3 +1,4 @@
+from backend.ui_dispatch import UiDispatcher
 """Desktop settings: update checks, explicit shortcut, tray opt-in and backup recovery."""
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -22,6 +23,8 @@ class JanelaAplicativo(ctk.CTkToplevel):
     def __init__(self, parent, data_manager, *, ao_restaurar=None,
                  ao_alterar_preferencia=None):
         super().__init__(parent)
+        self.transient(parent)
+        self._tasks = UiDispatcher(self)
         self.title("DCA Monitor · Aplicativo e manutenção")
         self.geometry("960x720+70+45")
         self.minsize(780,560)
@@ -116,6 +119,10 @@ class JanelaAplicativo(ctk.CTkToplevel):
             row,text="Preparar cópia de recuperação",
             fg_color=BG_INPUT,command=self._preparar_recuperacao,
         ).pack(side="left",padx=8)
+        ctk.CTkButton(recovery,text="Exportar pacote portátil de recuperação",
+            fg_color=BG_INPUT,command=self._exportar_pacote).pack(anchor="w",padx=12,pady=6)
+        ctk.CTkButton(recovery,text="Escolher destino independente de backup",
+            fg_color=BG_INPUT,command=self._escolher_backup_externo).pack(anchor="w",padx=12,pady=6)
         self._btn_restaurar=ctk.CTkButton(
             recovery,text="Fechar aplicativo e ativar recuperação",
             fg_color=BTC_ORANGE,text_color=BG_SURFACE,
@@ -148,12 +155,12 @@ class JanelaAplicativo(ctk.CTkToplevel):
         def tarefa():
             result=verificar_release_estavel()
             try:
-                self.after(0,lambda: self.status_atualizacao.configure(
+                self._tasks.post(lambda: self.status_atualizacao.configure(
                     text=result["mensagem"]+" Nenhum pacote é instalado nesta etapa.",
                 ) if self.winfo_exists() else None)
             except Exception:
                 pass
-        threading.Thread(target=tarefa,daemon=True).start()
+        self._tasks.run(tarefa)
 
     def _criar_atalho(self):
         if not messagebox.askyesno(
@@ -245,6 +252,27 @@ class JanelaAplicativo(ctk.CTkToplevel):
             )
         except Exception as exc:
             messagebox.showerror("Recuperação não preparada",str(exc),parent=self)
+
+    def _escolher_backup_externo(self):
+        target=filedialog.askdirectory(parent=self,title="Destino independente para cópias de segurança")
+        if not target:return
+        try:
+            from backend.backup_policy import configurar_destino_independente,proteger_gravacao
+            configurar_destino_independente(Path(self._db.arquivo_db).parent,target)
+            proteger_gravacao(self._db.arquivo_db)
+            self.status_backup.configure(text="Backup independente verificado em "+target+". Retenção: todas as cópias.",text_color=CYAN)
+        except Exception as exc:messagebox.showerror("Backup independente pendente",str(exc),parent=self)
+
+    def _exportar_pacote(self):
+        destino=filedialog.asksaveasfilename(parent=self,title="Salvar pacote de recuperação",
+            defaultextension=".zip",initialfile="DCA-Recuperacao.zip",filetypes=[("Pacote DCA","*.zip")])
+        if not destino:return
+        try:
+            from backend.recovery_bundle import exportar_pacote
+            result=exportar_pacote(self._db.arquivo_db,destino)
+            self.status_backup.configure(text="Pacote portátil verificado: "+result["pacote"],text_color=CYAN)
+        except Exception as exc:
+            messagebox.showerror("Pacote não exportado",str(exc),parent=self)
 
     def _pedir_restauracao(self):
         if self._manifesto_escolhido is None or self._on_restore is None:
