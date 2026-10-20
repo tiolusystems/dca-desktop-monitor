@@ -164,12 +164,17 @@ jobs:
             exit 1
           fi
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            EXISTING_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)
-            if [ -n "$EXISTING_SHA" ]; then
+            TAG_LOOKUP_ERROR=$(mktemp)
+            if EXISTING_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>"$TAG_LOOKUP_ERROR"); then
               test "$EXISTING_SHA" = "$GITHUB_SHA"
             else
+              if ! grep -q 'HTTP 404' "$TAG_LOOKUP_ERROR"; then
+                cat "$TAG_LOOKUP_ERROR" >&2
+                exit 1
+              fi
               gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
             fi
+            rm -f "$TAG_LOOKUP_ERROR"
           fi
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" = "$GITHUB_SHA"
           gh release create "$RELEASE_TAG" dist/windows/* dist/linux/* --verify-tag --title "DCA Monitor 1.0.0" --notes "Windows e Linux. Instalação/rollback automáticos não suportados; preparação manual com backup recuperável. Dados persistentes fora da instalação. Atualizações voluntárias com download SHA-256. Relatórios BRL históricos exigem custo, taxas e câmbio documentados."
