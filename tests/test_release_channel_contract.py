@@ -1,4 +1,4 @@
-"""Offline contract: publish v1.0.1 to the same repository the app polls."""
+"""Offline contract: publish v1.0.2 to the same repository the app polls."""
 from pathlib import Path
 import unittest
 
@@ -12,15 +12,15 @@ RELEASE_REPO = "tiolusystems/dca-desktop-monitor"
 
 class ReleaseChannelContractTests(unittest.TestCase):
     def test_version_and_release_channel_match_owned_repository(self):
-        self.assertEqual(APP_VERSION, "1.0.1")
+        self.assertEqual(APP_VERSION, "1.0.2")
         self.assertEqual(
             RELEASE_ENDPOINT,
             f"https://api.github.com/repos/{RELEASE_REPO}/releases/latest",
         )
 
     def test_expected_portable_archives_are_versioned(self):
-        self.assertEqual(archive_name("Windows"), "DCA-Monitor-v1.0.1-Windows-x64.zip")
-        self.assertEqual(archive_name("Linux"), "DCA-Monitor-v1.0.1-Linux-x64.tar.gz")
+        self.assertEqual(archive_name("Windows"), "DCA-Monitor-v1.0.2-Windows-x64.zip")
+        self.assertEqual(archive_name("Linux"), "DCA-Monitor-v1.0.2-Linux-x64.tar.gz")
 
     def test_release_workflow_requires_both_os_and_admin_gate(self):
         workflow = (ROOT / ".github/workflows/release-packages.yml").read_text(
