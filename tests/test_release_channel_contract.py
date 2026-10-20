@@ -33,7 +33,7 @@ class ReleaseChannelContractTests(unittest.TestCase):
             "git merge-base --is-ancestor",
             'test "$APPROVED_SHA" = "$GITHUB_SHA"',
             "sha256sum -c",
-            'gh release create "$GITHUB_REF_NAME"',
+            'gh release create "$RELEASE_TAG"',
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, workflow)
