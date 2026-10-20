@@ -72,6 +72,7 @@ class JanelaDistribuicao(ctk.CTkFrame):
         self._det_sel       = None
         self._det_hover     = None
         self._det_scroll_fn = None
+        self._janela_pendencias = None
 
         self._build_ui()
 
@@ -90,6 +91,13 @@ class JanelaDistribuicao(ctk.CTkFrame):
         self._badge.set_countdown(segundos)
 
     def _mostrar_pendencias(self):
+        existente = self._janela_pendencias
+        if existente is not None and existente.winfo_exists():
+            existente.deiconify()
+            existente.lift()
+            existente.focus_force()
+            return existente
+        self._janela_pendencias = None
         from backend.ledger_diagnostics import diagnosticar_operacoes
         try:
             issues = diagnosticar_operacoes(
@@ -98,9 +106,18 @@ class JanelaDistribuicao(ctk.CTkFrame):
         except Exception as exc:
             messagebox.showerror("Conferência indisponível", str(exc), parent=self)
             return
-        janela = ctk.CTkToplevel(self)
+        janela = ctk.CTkToplevel(self.winfo_toplevel())
+        self._janela_pendencias = janela
+        janela.transient(self.winfo_toplevel())
         janela.title("DCA — Conferir lançamentos sem alterar dados")
         janela.geometry("870x540")
+
+        def fechar():
+            if self._janela_pendencias is janela:
+                self._janela_pendencias = None
+            janela.destroy()
+
+        janela.protocol("WM_DELETE_WINDOW", fechar)
         ctk.CTkLabel(
             janela, text=f"Pendências: {len(issues)}. Seus dados não foram modificados.",
             font=ctk.CTkFont("Segoe UI", 15, "bold"),
@@ -127,13 +144,25 @@ class JanelaDistribuicao(ctk.CTkFrame):
                            variable=selected,state='readonly').pack(anchor='w',padx=17,pady=4)
             def editar():
                 indice=int(selected.get())-1
-                janela.destroy()
+                fechar()
                 self._on_review_operation(indice)
             ctk.CTkButton(janela,text='Consultar / corrigir operação selecionada',
                           command=editar).pack(anchor='w',padx=17,pady=4)
-        ctk.CTkButton(janela, text="Fechar", command=janela.destroy
+        ctk.CTkButton(janela, text="Fechar", command=fechar
                       ).pack(anchor="e", padx=17, pady=12)
+        # transient + a brief topmost pulse prevents the dialog from opening
+        # behind the dashboard on both Windows and common Linux window managers.
+        janela.deiconify()
         janela.lift()
+        janela.focus_force()
+        try:
+            janela.attributes("-topmost", True)
+            janela.after(180, lambda: (
+                janela.attributes("-topmost", False)
+                if janela.winfo_exists() else None
+            ))
+        except tk.TclError:
+            pass
         return janela
 
     def _build_ui(self):
