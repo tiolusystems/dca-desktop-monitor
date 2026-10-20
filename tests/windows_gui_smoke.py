@@ -533,6 +533,15 @@ def main():
                 assert not app._closing and app._tray_hidden
             app._restaurar_da_bandeja()
             assert not app._tray_hidden
+            # Exercise the real native tray backend as well as GUI callbacks.
+            if sys.platform == 'win32':
+                app._on_closing()
+                pump(root)
+                assert app._tray.ativa and app._tray_hidden and not app._closing
+                app._tray._abrir()
+                pump(root)
+                assert not app._tray_hidden and root.winfo_viewable()
+                print('GUI_WINDOWS_NATIVE_TRAY_HIDE_RESTORE=PASS')
             settings.variavel_bandeja.set(False)
             settings._alternar_bandeja()
             assert not app._preferences["minimizar_para_bandeja"]

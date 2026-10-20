@@ -35,7 +35,7 @@ class ReleaseCommitGateTests(unittest.TestCase):
                 if args[:2] == ['release', 'view']:
                     status = 0 if state['release'] else 1
                 elif args[:3] == ['api', '--method', 'POST']:
-                    assert 'ref=refs/tags/v1.0.0' in args
+                    assert 'ref=refs/tags/' + os.environ['EXPECTED_TAG'] in args
                     assert 'sha=' + os.environ['GITHUB_SHA'] in args
                     assert not state['tag']
                     state['tag'] = os.environ['GITHUB_SHA']
@@ -51,7 +51,7 @@ class ReleaseCommitGateTests(unittest.TestCase):
                         print('gh: Not Found (HTTP 404)', file=sys.stderr)
                         status = 1
                 elif args[:2] == ['release', 'create']:
-                    assert args[2] == 'v1.0.0'
+                    assert args[2] == os.environ['EXPECTED_TAG']
                     assert state['tag'] == os.environ['GITHUB_SHA']
                     assert not state['release']
                     state['release'] = True
@@ -77,7 +77,7 @@ class ReleaseCommitGateTests(unittest.TestCase):
                         lookup_error=name == "lookup forbidden")))
                     result = subprocess.run(["bash", "-c", script], cwd=ROOT,
                         env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
-                             "FAKE_STATE": str(state_path), "GITHUB_EVENT_NAME": event,
+                             "FAKE_STATE": str(state_path), "EXPECTED_TAG": "v" + __import__("backend.app_lifecycle", fromlist=["APP_VERSION"]).APP_VERSION, "GITHUB_EVENT_NAME": event,
                              "GITHUB_SHA": approved, "GITHUB_REPOSITORY": "synthetic/repo"},
                         capture_output=True, text=True)
                     state = json.loads(state_path.read_text())

@@ -45,7 +45,7 @@ jobs:
       - name: Package Windows application (real, no preview marker)
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --name DCA-Monitor --icon img/favicon.ico --collect-all customtkinter --collect-all ttkthemes --collect-all pystray --add-data "config/config.json:config" --add-data "img/favicon.ico:img" --add-data "img/favicon.png:img" main.pyw
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name DCA-Monitor --icon img/dca-monitor.ico --collect-all customtkinter --collect-all ttkthemes --collect-all pystray --add-data "config/config.json:config" --add-data "img/favicon.ico:img" --add-data "img/favicon.png:img" --add-data "img/dca-monitor.ico:img" --add-data "img/dca-monitor.png:img" main.pyw
           if ($LASTEXITCODE -ne 0) { throw "Build Windows falhou" }
           if (!(Test-Path "dist/DCA-Monitor/DCA-Monitor.exe")) { throw "Sem executável" }
           if (Test-Path "dist/DCA-Monitor/DCA-PREVIEW-MODE") { throw "Prévia proibida" }
@@ -53,6 +53,8 @@ jobs:
         run: python scripts/release_archive.py
       - name: Extract final ZIP, verify Tcl/Tk, graceful exit and reopen
         run: python tests/frozen_release_smoke.py
+      - name: Windows real update transaction, backup, GUI receipt and native shortcut
+        run: python tests/windows_update_smoke.py
       - name: Keep Windows acceptance receipt
         uses: actions/upload-artifact@v4
         with:
@@ -63,8 +65,8 @@ jobs:
         with:
           name: DCA-Monitor-Windows-x64
           path: |
-            DCA-Monitor-v1.0.0-Windows-x64.zip
-            DCA-Monitor-v1.0.0-Windows-x64.zip.sha256
+            DCA-Monitor-v*-Windows-x64.zip
+            DCA-Monitor-v*-Windows-x64.zip.sha256
           retention-days: 14
           if-no-files-found: error
 
@@ -90,7 +92,7 @@ jobs:
         run: xvfb-run -a python tests/linux_csv_dialog_smoke.py
       - name: Package Linux application
         run: |
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --name DCA-Monitor --collect-all customtkinter --collect-all ttkthemes --collect-all pystray --add-data "config/config.json:config" --add-data "img/favicon.ico:img" --add-data "img/favicon.png:img" main.pyw
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name DCA-Monitor --collect-all customtkinter --collect-all ttkthemes --collect-all pystray --add-data "config/config.json:config" --add-data "img/favicon.ico:img" --add-data "img/favicon.png:img" --add-data "img/dca-monitor.ico:img" --add-data "img/dca-monitor.png:img" main.pyw
           test -x dist/DCA-Monitor/DCA-Monitor
           test ! -e dist/DCA-Monitor/DCA-PREVIEW-MODE
       - name: Build complete versioned Linux archive and checksum
@@ -107,8 +109,8 @@ jobs:
         with:
           name: DCA-Monitor-Linux-x64
           path: |
-            DCA-Monitor-v1.0.0-Linux-x64.tar.gz
-            DCA-Monitor-v1.0.0-Linux-x64.tar.gz.sha256
+            DCA-Monitor-v*-Linux-x64.tar.gz
+            DCA-Monitor-v*-Linux-x64.tar.gz.sha256
           retention-days: 14
           if-no-files-found: error
 
@@ -177,4 +179,4 @@ jobs:
             rm -f "$TAG_LOOKUP_ERROR"
           fi
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" = "$GITHUB_SHA"
-          gh release create "$RELEASE_TAG" dist/windows/* dist/linux/* --verify-tag --title "DCA Monitor 1.0.0" --notes "Windows e Linux. Instalação/rollback automáticos não suportados; preparação manual com backup recuperável. Dados persistentes fora da instalação. Atualizações voluntárias com download SHA-256. Relatórios BRL históricos exigem custo, taxas e câmbio documentados."
+          gh release create "$RELEASE_TAG" dist/windows/* dist/linux/* --verify-tag --title "DCA Monitor $VERSION" --notes "Windows e Linux. Windows: atalho automático, bandeja opcional e instalação assistida de atualizações com backup recuperável e confirmação de abertura. Linux: distribuição portátil com troca manual da pasta. Rollback do banco não é automático. Dados persistentes fora da instalação. Atualizações voluntárias com download SHA-256. Relatórios BRL históricos exigem custo, taxas e câmbio documentados."

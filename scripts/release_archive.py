@@ -108,6 +108,6 @@ def extract_verified(archive_path,destination,*,commit=None):
 if __name__=='__main__':
     commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
     bundle=ROOT/'dist'/'DCA-Monitor'
-    shutil.copyfile(ROOT/'docs'/'RELEASE_V1_0_0.md',bundle/'LEIA-ME.md')
+    shutil.copyfile(ROOT/'docs'/'RELEASE_PORTABLE.md',bundle/'LEIA-ME.md')
     build_archive(bundle,ROOT/archive_name(),commit=commit)
     print('RELEASE_ARCHIVE_COMPLETE='+archive_name())
