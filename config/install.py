@@ -1,7 +1,7 @@
 """
 Instala o Portfolio DCA Monitor como atalho clicavel no sistema.
 
-Windows : cria atalho na Area de Trabalho com icone — pode fixar na barra de tarefas
+Windows : cria atalho na Área de Trabalho ou no Menu Iniciar, com ícone
 Linux   : cria entrada no menu de aplicativos — pode fixar no dock/painel
 
 Uso (a partir da raiz do projeto ou da pasta config/):
@@ -68,7 +68,7 @@ def preparar_atalho_windows(
 
 
 def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
-    """Create or retarget only our shortcut; preserve unrelated user shortcuts."""
+    """Create or retarget a shortcut in the supplied Windows folder only."""
     executable = Path(executavel or sys.executable).resolve()
     localizacao = _powershell("[Environment]::GetFolderPath('Desktop')", timeout=15)
     escritorio = localizacao.stdout.strip() if localizacao.returncode == 0 else ""
@@ -111,8 +111,7 @@ def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
                     'status': 'Atalho existente de outra instalação preservado. Remova-o ou renomeie-o para criar este.'}
     if not desktop.is_dir():
         raise FileNotFoundError(
-            "Pasta Desktop não encontrada. Se estiver no OneDrive, "
-            "selecione o destino ao criar o atalho."
+            "Pasta de atalhos não encontrada no Windows."
         )
     script = preparar_atalho_windows(shortcut, executavel=executable)
     result = _powershell(script, timeout=30)
@@ -124,6 +123,26 @@ def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
     return {"criado": True, "atalho": str(shortcut),
             "proprio": True,
             "status": "Atalho criado e verificado."}
+
+
+def install_menu_iniciar_windows(*, executavel=None, anterior=None, menu_iniciar=None) -> dict:
+    """Create or refresh only DCA's own shortcut in the current user's Start Menu."""
+    if menu_iniciar is None:
+        localizacao = _powershell(
+            "[Environment]::GetFolderPath('Programs')", timeout=15
+        )
+        pasta = localizacao.stdout.strip() if localizacao.returncode == 0 else ""
+        if not pasta:
+            raise RuntimeError("O Windows não informou a pasta do Menu Iniciar.")
+        menu_iniciar = Path(pasta)
+    resultado = install_windows(
+        executavel=executavel, anterior=anterior, desktop=Path(menu_iniciar)
+    )
+    resultado["status"] = resultado["status"].replace(
+        "Atalho criado e verificado.",
+        "Atalho do Menu Iniciar criado e verificado.",
+    )
+    return resultado
 
 
 def primeiro_atalho(data_dir):
