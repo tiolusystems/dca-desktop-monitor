@@ -72,8 +72,8 @@ def main():
         process=subprocess.Popen([str(source),'--maintenance-update',str(action)],env=env,cwd=source.parent)
         shortcut=None;candidate=None;receipt=None;reopened=None
         try:
-            assert process.wait(timeout=150)==0,action.read_text()
-            receipt=json.loads(action.read_text())
+            assert process.wait(timeout=150)==0,action.read_text(encoding="utf-8")
+            receipt=json.loads(action.read_text(encoding="utf-8"))
             assert receipt['state']=='installed',receipt
             candidate=kernel.OpenProcess(0x100000|0x1000,False,receipt['pid'])
             assert candidate
