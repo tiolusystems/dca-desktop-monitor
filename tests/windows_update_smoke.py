@@ -70,7 +70,7 @@ def main():
              version_atual='1.0.0',raiz=local/'Programs/DCA-Monitor/versions',origem=source)
         action=Path(plan['acao'])
         process=subprocess.Popen([str(source),'--maintenance-update',str(action)],env=env,cwd=source.parent)
-        shortcut=None;candidate=None;receipt=None
+        shortcut=None;candidate=None;receipt=None;reopened=None
         try:
             assert process.wait(timeout=150)==0,action.read_text()
             receipt=json.loads(action.read_text())
@@ -99,7 +99,27 @@ def main():
             assert carteira(dm.arquivo_db)==bank_before
             print('WINDOWS_REAL_UPDATE_BACKUP_GUI_RECEIPT_SHORTCUT=PASS')
             print('WINDOWS_REAL_UPDATE_PRECISE_SQLITE_AND_NORMAL_CLOSE=PASS')
+            # A regular launch also exercises the first-run automatic shortcut,
+            # without the synthetic-wallet suppression used by archive smoke.
+            reopened=subprocess.Popen([expected],cwd=Path(expected).parent,
+                env={**env,'DCA_MONITOR_DATA_DIR':str(dm.arquivo_db.parent)})
+            marker=dm.arquivo_db.parent/'desktop-setup.json'
+            deadline=time.monotonic()+60
+            while not marker.is_file() and time.monotonic()<deadline:
+                assert reopened.poll() is None,'Regular launch exited early'
+                time.sleep(.25)
+            assert marker.is_file(),'Automatic Desktop shortcut did not run'
+            assert json.loads(marker.read_text('utf-8'))['criado']
+            fechar_janela(reopened.pid)
+            assert reopened.wait(timeout=30)==0
+            assert carteira(dm.arquivo_db)==bank_before
+            print('WINDOWS_REAL_FIRST_RUN_AUTOMATIC_SHORTCUT_AND_REOPEN=PASS')
         finally:
+            if reopened and reopened.poll() is None:
+                fechar_janela(reopened.pid)
+                try:reopened.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    reopened.kill();reopened.wait()  # FAILED test cleanup only
             if candidate:
                 if kernel.WaitForSingleObject(candidate,0)!=0:
                     fechar_janela(receipt['pid'])
