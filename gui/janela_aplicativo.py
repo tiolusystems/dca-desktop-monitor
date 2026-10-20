@@ -79,11 +79,11 @@ class JanelaAplicativo(ctk.CTkToplevel):
                     'O atalho só muda após a confirmação de abertura. '
                     'No Linux, a troca da pasta continua manual.')
 
-        shortcuts=self._box(wrap,"Atalho da Área de Trabalho")
+        shortcuts=self._box(wrap,"Atalhos do Windows")
         self.status_atalho=self._texto(
             shortcuts,
-            "O Windows cria o atalho na primeira abertura. "
-            "Use este botão para recriá-lo nesta instalação.",
+            "O Windows cria o atalho da Área de Trabalho na primeira abertura. "
+            "Use os botões para recriá-lo ou adicioná-lo ao Menu Iniciar nesta instalação.",
         )
         frozen=getattr(sys,"frozen",False)
         preview=(Path(sys.executable).parent/"DCA-PREVIEW-MODE").is_file()
@@ -94,10 +94,17 @@ class JanelaAplicativo(ctk.CTkToplevel):
             fg_color=BTC_ORANGE,text_color=BG_SURFACE,
             command=self._criar_atalho,
         )
-        self.btn_atalho.pack(anchor="w",padx=12,pady=(7,12))
+        self.btn_atalho.pack(anchor="w",padx=12,pady=(7,5))
+        self.btn_menu_iniciar=ctk.CTkButton(
+            shortcuts,text="Criar atalho no Menu Iniciar",
+            state="normal" if enabled else "disabled",
+            fg_color=BG_INPUT,
+            command=lambda: self._criar_atalho(menu_iniciar=True),
+        )
+        self.btn_menu_iniciar.pack(anchor="w",padx=12,pady=(5,12))
         if not enabled:
             self.status_atalho.configure(
-                text="Atalho operacional disponível apenas após instalar "
+                text="Atalhos operacionais disponíveis apenas após instalar "
                 "uma versão Windows homologada; este é um ambiente de desenvolvimento.",
             )
 
@@ -300,15 +307,20 @@ class JanelaAplicativo(ctk.CTkToplevel):
             self._tasks.post(done)
         self._tasks.run(worker)
 
-    def _criar_atalho(self):
+    def _criar_atalho(self, *, menu_iniciar=False):
+        destino = "no Menu Iniciar" if menu_iniciar else "na Área de Trabalho"
         if not messagebox.askyesno(
-            "Criar atalho", "Criar um atalho para a instalação atual na Área de Trabalho?",
+            "Criar atalho",
+            f"Criar um atalho para a instalação atual {destino}?",
             parent=self,
         ):
             return
         try:
-            from config.install import install_windows
-            resultado=install_windows()
+            if menu_iniciar:
+                from config.install import install_menu_iniciar_windows as instalar
+            else:
+                from config.install import install_windows as instalar
+            resultado=instalar()
             self.status_atalho.configure(
                 text=f"{resultado['status']} Local: {resultado['atalho']}",
                 text_color=CYAN,
