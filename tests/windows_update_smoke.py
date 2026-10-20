@@ -7,10 +7,12 @@ are the newly built binary. This is not a claim that the 1.0.0 binary can update
 from pathlib import Path
 import ctypes
 from ctypes import wintypes
+from contextlib import closing
 import json
 import os
 import subprocess
 import sys
+import sqlite3
 import tempfile
 import time
 
@@ -19,6 +21,26 @@ sys.path.insert(0,str(ROOT))
 from backend.app_lifecycle import APP_VERSION
 from backend.backend import DataManager
 from backend.update_install import preparar_instalacao, sha256
+
+
+def carteira(path):
+    # Existing startup reasserts PRAGMA user_version, changing the SQLite change
+    # counter (header bytes 27/95), even when schema and every row are identical.
+    # Compare the COMPLETE logical database, including audit/identity/sequences.
+    with closing(sqlite3.connect(Path(path).as_uri()+'?mode=ro',uri=True)) as conn:
+        assert conn.execute('PRAGMA integrity_check').fetchone()==('ok',)
+        return list(conn.iterdump()),conn.execute('PRAGMA user_version').fetchone()
+
+
+def fechar_janela(pid):
+    callback_type=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
+    def close(hwnd,_):
+        owner=wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd,ctypes.byref(owner))
+        if owner.value==pid and ctypes.windll.user32.IsWindowVisible(hwnd):
+            ctypes.windll.user32.PostMessageW(hwnd,0x0010,0,0)
+        return True
+    ctypes.windll.user32.EnumWindows(callback_type(close),0)
 
 
 def main():
@@ -39,7 +61,7 @@ def main():
         dm=DataManager(data_dir=root/'wallet',auto_import_legacy=False)
         assert dm.salvar_operacao(['2026-01-01 12:00:00','USDT','compra',
                                   '10.123456789123456789','5','10.123456789123456789','5'])
-        bank_before=dm.arquivo_db.read_bytes()
+        bank_before=carteira(dm.arquivo_db)
         name=archive.name
         info=dict(download_disponivel=True,versao_publicada=APP_VERSION,pacote=dict(
             nome=name,url=f'https://github.com/tiolusystems/dca-desktop-monitor/releases/download/v{APP_VERSION}/{name}',
@@ -48,14 +70,16 @@ def main():
              version_atual='1.0.0',raiz=local/'Programs/DCA-Monitor/versions',origem=source)
         action=Path(plan['acao'])
         process=subprocess.Popen([str(source),'--maintenance-update',str(action)],env=env,cwd=source.parent)
-        shortcut=None;candidate=None
+        shortcut=None;candidate=None;receipt=None
         try:
             assert process.wait(timeout=150)==0,action.read_text()
             receipt=json.loads(action.read_text())
             assert receipt['state']=='installed',receipt
-            assert Path(receipt['backup']['pacote']).is_file()
-            assert dm.arquivo_db.read_bytes()==bank_before
+            candidate=kernel.OpenProcess(0x100000|0x1000,False,receipt['pid'])
+            assert candidate
             shortcut=Path(receipt['shortcut']['atalho'])
+            assert Path(receipt['backup']['pacote']).is_file()
+            assert carteira(dm.arquivo_db)==bank_before
             assert shortcut.is_file()
             # Inspect the real .lnk via the same native COM API Explorer uses.
             quote=str(shortcut).replace("'","''")
@@ -69,23 +93,21 @@ def main():
             assert link['target']==expected,link
             assert link['icon'].split(',')[0]==expected,link
             assert not link['arguments'],link
-            candidate=ctypes.windll.kernel32.OpenProcess(0x100000|0x1000,False,receipt['pid'])
-            assert candidate
             # Close the real new GUI normally; never terminate it as success evidence.
-            callback_type=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
-            def close(hwnd,_):
-                pid=wintypes.DWORD()
-                ctypes.windll.user32.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
-                if pid.value==receipt['pid'] and ctypes.windll.user32.IsWindowVisible(hwnd):
-                    ctypes.windll.user32.PostMessageW(hwnd,0x0010,0,0)
-                return True
-            ctypes.windll.user32.EnumWindows(callback_type(close),0)
+            fechar_janela(receipt['pid'])
             assert ctypes.windll.kernel32.WaitForSingleObject(candidate,30000)==0
-            assert dm.arquivo_db.read_bytes()==bank_before
+            assert carteira(dm.arquivo_db)==bank_before
             print('WINDOWS_REAL_UPDATE_BACKUP_GUI_RECEIPT_SHORTCUT=PASS')
             print('WINDOWS_REAL_UPDATE_PRECISE_SQLITE_AND_NORMAL_CLOSE=PASS')
         finally:
-            if candidate:ctypes.windll.kernel32.CloseHandle(candidate)
+            if candidate:
+                if kernel.WaitForSingleObject(candidate,0)!=0:
+                    fechar_janela(receipt['pid'])
+                    if kernel.WaitForSingleObject(candidate,10000)!=0:
+                        # Only after a FAILED assertion; never evidence of graceful exit.
+                        subprocess.run(['taskkill','/PID',str(receipt['pid']),'/T','/F'],
+                                       capture_output=True,timeout=15)
+                kernel.CloseHandle(candidate)
             if process.poll() is None:
                 process.kill();process.wait()  # failure cleanup only
             if shortcut and shortcut.is_file():shortcut.unlink()
