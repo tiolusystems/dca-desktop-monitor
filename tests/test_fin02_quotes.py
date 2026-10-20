@@ -30,6 +30,21 @@ class BinanceFalsa:
         }.get(par)}
 
 
+class BinanceLoteFalsa(BinanceFalsa):
+    has = {"fetchTickers": True}
+
+    def fetch_tickers(self, pares):
+        self.chamadas.append(tuple(pares))
+        return {
+            par: {"last": {
+                "BTC/USDT": 100,
+                "ETH/USDT": 50,
+                "USDT/BRL": 5.20,
+            }.get(par)}
+            for par in pares if par not in self.faltam
+        }
+
+
 class IntegridadeCotacaoTests(unittest.TestCase):
     def setUp(self):
         self.ops = [
@@ -121,6 +136,46 @@ class IntegridadeCotacaoTests(unittest.TestCase):
         self.assertIsNone(pm.get_preco("ETH"))
         self.assertEqual(pm.get_preco("BTC"), 100)
         self.assertIsNone(pm.taxa_brl_para_avaliacao())
+
+    def test_binance_busca_todos_os_ativos_e_cambio_em_um_lote(self):
+        pm = PriceManager.__new__(PriceManager)
+        pm.exchange = BinanceLoteFalsa()
+        pm.precos_cache = {}
+        pm.cotacoes_atualizadas_em = {}
+        pm.falhas_cotacao = set()
+        pm.ultima_atualizacao = None
+        pm.preco_brl = 0
+        pm._brl_atualizado_em = None
+        pm._brl_falhou = True
+
+        self.assertTrue(pm.atualizar_precos(["BTC", "ETH", "BTC", "USDT"]))
+        self.assertEqual(pm.exchange.chamadas, [("BTC/USDT", "ETH/USDT", "USDT/BRL")])
+        self.assertEqual(pm.precos_para_avaliacao()["ETH"], 50)
+        self.assertEqual(pm.taxa_brl_para_avaliacao(), 5.2)
+
+    def test_falha_do_lote_e_rapida_e_nao_dispara_tickers_individuais(self):
+        class BinanceLoteIndisponivel(BinanceLoteFalsa):
+            def fetch_tickers(self, pares):
+                self.chamadas.append(tuple(pares))
+                raise ConnectionError("falha do lote")
+
+            def fetch_ticker(self, par):
+                raise AssertionError("não deve consultar cada par após falha do lote")
+
+        pm = PriceManager.__new__(PriceManager)
+        pm.exchange = BinanceLoteIndisponivel()
+        pm.precos_cache = {"BTC": 100}
+        pm.cotacoes_atualizadas_em = {}
+        pm.falhas_cotacao = set()
+        pm.ultima_atualizacao = None
+        pm.preco_brl = 5.2
+        pm._brl_atualizado_em = None
+        pm._brl_falhou = False
+
+        self.assertFalse(pm.atualizar_precos(["BTC", "ETH"]))
+        self.assertEqual(pm.exchange.chamadas, [("BTC/USDT", "ETH/USDT", "USDT/BRL")])
+        self.assertEqual(pm.falhas_cotacao, {"BTC", "ETH"})
+        self.assertTrue(pm._brl_falhou)
 
     def test_expiracao_de_cache_em_dias_ou_minutos_rejeita_cotacao(self):
         pm = PriceManager.__new__(PriceManager)
