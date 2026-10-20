@@ -1,5 +1,30 @@
 # DCA Monitor v1.0.0 — publicação controlada no fork Tiolu Systems
 
+## Política vigente em 20/10/2026 — operação individual autorizada
+
+Luciano aprovou substituir a exigência de segundo revisor pela aprovação explícita
+do proprietário e confirmou as alterações nas proteções de branch/ambiente.
+Essa decisão substitui as referências históricas a revisão independente neste
+roteiro e em `DISTRIBUTION_POLICY.md` / `FINALIZACAO_1_0_0_BLOQUEIOS.md`.
+Permanecem PR, testes obrigatórios, proteção de histórico/tags, backups, checksums,
+SHA aprovado exatamente igual ao HEAD integrado e recusa de sobrescrever Release.
+Não foi simulada revisão independente e não deve ser usado bypass.
+
+O workflow oficial admite **Run workflow → main** para publicar sem terminal:
+1. Aguardar CI do commit integrado e registrar seu SHA definitivo.
+2. No ambiente `production`, permitir também a branch `main` nas regras de
+   deployment, preservando a regra de tags `v*`. A execução manual é bloqueada
+   para outras branches e precisa da aprovação pelo SHA.
+3. Cadastrar `DCA_DISTRIBUTION_APPROVED_SHA` em **Environment variables** com
+   aquele SHA exato. Não usar o HEAD anterior da PR nem variável em Secrets.
+4. Em Actions → DCA production packages and gated release → Run workflow,
+   escolher `main`. Os dois pacotes são reconstruídos e testados nessa execução.
+5. Após os gates e checksums, a receita cria `v1.0.0` no SHA autorizado e publica
+   ambos os pacotes. Uma tag existente só é aceita se já aponta para esse SHA;
+   nenhuma tag é movida e nenhuma Release existente é sobrescrita.
+6. Conferir Release, assets, digests e canal oficial. Até essa verificação não
+   declarar publicação concluída. O botão manual não dispensa aprovação do SHA.
+
 ## Identidade e escopo
 
 - Repositório de publicação: `tiolusystems/dca-desktop-monitor`.

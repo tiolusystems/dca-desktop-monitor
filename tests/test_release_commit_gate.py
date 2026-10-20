@@ -9,12 +9,74 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import json
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseCommitGateTests(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "The publication job runs on Ubuntu/bash")
+    def test_publication_never_moves_tags_or_overwrites_a_release(self):
+        workflow = (ROOT / ".github/workflows/release-packages.yml").read_text()
+        step = workflow.split("      - name: Publish both OS builds only after approvals", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory(prefix="dca-publication-dry-run-") as temp:
+            root = Path(temp)
+            fake = root / "gh"
+            fake.write_text("#!" + sys.executable + "\n" + textwrap.dedent('''\
+                import json, os, pathlib, sys
+                args = sys.argv[1:]
+                state_path = pathlib.Path(os.environ['FAKE_STATE'])
+                state = json.loads(state_path.read_text())
+                state['calls'].append(args)
+                status = 0
+                if args[:2] == ['release', 'view']:
+                    status = 0 if state['release'] else 1
+                elif args[:3] == ['api', '--method', 'POST']:
+                    assert 'ref=refs/tags/v1.0.0' in args
+                    assert 'sha=' + os.environ['GITHUB_SHA'] in args
+                    assert not state['tag']
+                    state['tag'] = os.environ['GITHUB_SHA']
+                elif args[0] == 'api':
+                    if state['tag']: print(state['tag'])
+                    else: status = 1
+                elif args[:2] == ['release', 'create']:
+                    assert args[2] == 'v1.0.0'
+                    assert state['tag'] == os.environ['GITHUB_SHA']
+                    assert not state['release']
+                    state['release'] = True
+                else: raise AssertionError(args)
+                state_path.write_text(json.dumps(state))
+                sys.exit(status)
+            '''))
+            fake.chmod(0o755)
+            approved = "a" * 40
+            cases = (
+                ("manual new tag", "workflow_dispatch", "", False, True),
+                ("manual same tag retry", "workflow_dispatch", approved, False, True),
+                ("manual different tag target", "workflow_dispatch", "b" * 40, False, False),
+                ("published release", "workflow_dispatch", approved, True, False),
+                ("tag event matching SHA", "push", approved, False, True),
+                ("tag event different SHA", "push", "b" * 40, False, False),
+            )
+            for name, event, tag, published, accepted in cases:
+                with self.subTest(case=name):
+                    state_path = root / "state.json"
+                    state_path.write_text(json.dumps(dict(tag=tag, release=published, calls=[])))
+                    result = subprocess.run(["bash", "-c", script], cwd=ROOT,
+                        env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
+                             "FAKE_STATE": str(state_path), "GITHUB_EVENT_NAME": event,
+                             "GITHUB_SHA": approved, "GITHUB_REPOSITORY": "synthetic/repo"},
+                        capture_output=True, text=True)
+                    state = json.loads(state_path.read_text())
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+                    self.assertEqual(any(c[:2] == ['release', 'create'] for c in state['calls']), accepted)
+                    if not accepted:
+                        self.assertEqual(state['tag'], tag)
+                        self.assertEqual(state['release'], published)
+
     @unittest.skipIf(os.name == "nt", "The publication gate runs on Ubuntu/bash")
     def test_actual_gate_accepts_only_approved_current_main_and_matching_version(self):
         workflow = (ROOT / ".github/workflows/release-packages.yml").read_text()
@@ -46,19 +108,24 @@ class ReleaseCommitGateTests(unittest.TestCase):
             git("clone", str(origin), str(checkout), cwd=root)
 
             cases = (
-                ("approved current main", current, current, "refs/tags/v1.0.0", True),
-                ("missing approval", current, "", "refs/tags/v1.0.0", False),
-                ("approval for another commit", current, ancestor, "refs/tags/v1.0.0", False),
-                ("approved old ancestor", ancestor, ancestor, "refs/tags/v1.0.0", False),
-                ("incorrect version tag", current, current, "refs/tags/v1.0.1", False),
-                ("branch instead of version tag", current, current, "refs/heads/main", False),
+                ("approved tag", current, current, "refs/tags/v1.0.0", "push", True),
+                ("missing approval", current, "", "refs/tags/v1.0.0", "push", False),
+                ("approval for another commit", current, ancestor, "refs/tags/v1.0.0", "push", False),
+                ("approved old ancestor", ancestor, ancestor, "refs/tags/v1.0.0", "push", False),
+                ("incorrect version tag", current, current, "refs/tags/v1.0.1", "push", False),
+                ("branch push cannot publish", current, current, "refs/heads/main", "push", False),
+                ("manual approved main", current, current, "refs/heads/main", "workflow_dispatch", True),
+                ("manual missing approval", current, "", "refs/heads/main", "workflow_dispatch", False),
+                ("manual stale SHA", ancestor, ancestor, "refs/heads/main", "workflow_dispatch", False),
+                ("manual other branch", current, current, "refs/heads/other", "workflow_dispatch", False),
             )
-            for name, sha, approved, ref, accepted in cases:
+            for name, sha, approved, ref, event, accepted in cases:
                 with self.subTest(case=name):
                     result = subprocess.run(
                         ["bash", "-c", gate], cwd=checkout,
                         env={**os.environ, "GITHUB_SHA": sha,
-                             "APPROVED_SHA": approved, "GITHUB_REF": ref},
+                             "APPROVED_SHA": approved, "GITHUB_REF": ref,
+                             "GITHUB_EVENT_NAME": event},
                         capture_output=True, text=True,
                     )
                     self.assertEqual(result.returncode == 0, accepted, result.stderr)

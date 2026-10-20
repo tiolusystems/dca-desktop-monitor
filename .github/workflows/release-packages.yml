@@ -1,6 +1,7 @@
 name: DCA production packages and gated release
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'backend/**'
@@ -114,7 +115,7 @@ jobs:
   release:
     name: Gated GitHub Releases publication
     needs: [package-windows, package-linux]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -134,7 +135,11 @@ jobs:
           test -n "$APPROVED_SHA"
           test "$APPROVED_SHA" = "$GITHUB_SHA"
           VERSION=$(python -c "from backend.app_lifecycle import APP_VERSION;print(APP_VERSION)")
-          test "$GITHUB_REF" = "refs/tags/v$VERSION"
+          if [ "${GITHUB_EVENT_NAME:-push}" = workflow_dispatch ]; then
+            test "$GITHUB_REF" = refs/heads/main
+          else
+            test "$GITHUB_REF" = "refs/tags/v$VERSION"
+          fi
       - uses: actions/download-artifact@v4
         with:
           name: DCA-Monitor-Windows-x64
@@ -152,8 +157,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          VERSION=$(python -c "from backend.app_lifecycle import APP_VERSION;print(APP_VERSION)")
+          RELEASE_TAG="v$VERSION"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo 'Tag release already published; refusing to overwrite'
             exit 1
           fi
-          gh release create "$GITHUB_REF_NAME" dist/windows/* dist/linux/* --verify-tag --title "DCA Monitor 1.0.0" --notes "Windows e Linux. Instalação/rollback automáticos não suportados; preparação manual com backup recuperável. Dados persistentes fora da instalação. Atualizações voluntárias com download SHA-256. Relatórios BRL históricos exigem custo, taxas e câmbio documentados."
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            EXISTING_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha' 2>/dev/null || true)
+            if [ -n "$EXISTING_SHA" ]; then
+              test "$EXISTING_SHA" = "$GITHUB_SHA"
+            else
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$GITHUB_SHA"
+            fi
+          fi
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')" = "$GITHUB_SHA"
+          gh release create "$RELEASE_TAG" dist/windows/* dist/linux/* --verify-tag --title "DCA Monitor 1.0.0" --notes "Windows e Linux. Instalação/rollback automáticos não suportados; preparação manual com backup recuperável. Dados persistentes fora da instalação. Atualizações voluntárias com download SHA-256. Relatórios BRL históricos exigem custo, taxas e câmbio documentados."
