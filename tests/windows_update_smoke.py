@@ -32,7 +32,8 @@ def main():
     archive=ROOT/f'DCA-Monitor-v{APP_VERSION}-Windows-x64.zip'
     source=ROOT/'dist/DCA-Monitor/DCA-Monitor.exe'
     with tempfile.TemporaryDirectory(prefix='dca-update-real-') as temp:
-        root=Path(temp).resolve()
+        root=Path(temp).resolve()/'Carteira João'
+        root.mkdir()
         local=root/'local';local.mkdir()
         env={**os.environ,'LOCALAPPDATA':str(local)}
         dm=DataManager(data_dir=root/'wallet',auto_import_legacy=False)
@@ -59,9 +60,10 @@ def main():
             # Inspect the real .lnk via the same native COM API Explorer uses.
             quote=str(shortcut).replace("'","''")
             inspection=subprocess.run(['powershell','-NoProfile','-NonInteractive','-Command',
+                "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "+
                 "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"+quote+
                 "'); @{target=$s.TargetPath;icon=$s.IconLocation;arguments=$s.Arguments} | ConvertTo-Json -Compress"],
-                capture_output=True,text=True,check=True,timeout=20)
+                capture_output=True,text=True,encoding='utf-8',check=True,timeout=20)
             link=json.loads(inspection.stdout)
             expected=str(Path(plan['destino'])/'DCA-Monitor.exe')
             assert link['target']==expected,link

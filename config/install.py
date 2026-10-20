@@ -23,7 +23,8 @@ def _powershell(arguments, *, timeout):
     """The windowed app must not flash a console while managing its shortcut."""
     options = {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}
     return subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
-                           arguments], capture_output=True, text=True,
+                           '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ' +
+                           arguments], capture_output=True, text=True, encoding='utf-8',
                           timeout=timeout, **options)
 
 
