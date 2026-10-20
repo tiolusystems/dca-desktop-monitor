@@ -33,7 +33,7 @@ def package(root, version='1.1.0', extra=None):
 class DesktopUpdateTests(unittest.TestCase):
     def setUp(self):
         tmp=TemporaryDirectory();self.addCleanup(tmp.cleanup)
-        self.root=Path(tmp.name)
+        self.root=Path(tmp.name).resolve()
         self.dm=DataManager(data_dir=self.root/'wallet',auto_import_legacy=False)
         self.dm.salvar_operacao(['2026-01-01 12:00:00','USDT','compra','10','5','10','5'])
         self.db_before=self.dm.arquivo_db.read_bytes()

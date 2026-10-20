@@ -19,6 +19,14 @@ ICON_FILE = BASE_DIR / "img" / "dca-monitor.ico"
 APP_NAME = "Portfolio DCA Monitor"
 
 
+def _powershell(arguments, *, timeout):
+    """The windowed app must not flash a console while managing its shortcut."""
+    options = {'creationflags': subprocess.CREATE_NO_WINDOW} if sys.platform == 'win32' else {}
+    return subprocess.run(['powershell', '-NoProfile', '-NonInteractive', '-Command',
+                           arguments], capture_output=True, text=True,
+                          timeout=timeout, **options)
+
+
 def preparar_atalho_windows(
     destino: Path, *, executavel: Path | None = None, script: Path | None = None,
     icone: Path | None = None,
@@ -61,11 +69,7 @@ def preparar_atalho_windows(
 def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
     """Create or retarget only our shortcut; preserve unrelated user shortcuts."""
     executable = Path(executavel or sys.executable).resolve()
-    localizacao = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-         "[Environment]::GetFolderPath('Desktop')"],
-        capture_output=True, text=True, timeout=15,
-    )
+    localizacao = _powershell("[Environment]::GetFolderPath('Desktop')", timeout=15)
     escritorio = localizacao.stdout.strip() if localizacao.returncode == 0 else ""
     desktop = Path(desktop) if desktop is not None else (Path(escritorio) if escritorio else None)
     if desktop is None:
@@ -73,11 +77,10 @@ def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
     shortcut = desktop / f"{APP_NAME}.lnk"
     if shortcut.exists():
         quoted = str(shortcut).replace("'", "''")
-        inspected = subprocess.run(
-            ['powershell', '-NoProfile', '-NonInteractive', '-Command',
+        inspected = _powershell(
              "$ErrorActionPreference='Stop'; $s=(New-Object -ComObject WScript.Shell).CreateShortcut('"+
-             quoted+"'); @{target=$s.TargetPath;description=$s.Description;arguments=$s.Arguments} | ConvertTo-Json -Compress"],
-            capture_output=True, text=True, timeout=15)
+             quoted+"'); @{target=$s.TargetPath;description=$s.Description;arguments=$s.Arguments} | ConvertTo-Json -Compress",
+             timeout=15)
         import json
         existing = json.loads(inspected.stdout) if inspected.returncode == 0 else {}
         known = {str(executable).casefold()}
@@ -111,10 +114,7 @@ def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
             "selecione o destino ao criar o atalho."
         )
     script = preparar_atalho_windows(shortcut, executavel=executable)
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=30,
-    )
+    result = _powershell(script, timeout=30)
     if result.returncode != 0 or not shortcut.is_file():
         raise RuntimeError(
             "Falha ao criar o atalho: " + (result.stderr or "sem confirmação")

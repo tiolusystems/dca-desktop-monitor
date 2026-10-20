@@ -32,7 +32,7 @@ def main():
     archive=ROOT/f'DCA-Monitor-v{APP_VERSION}-Windows-x64.zip'
     source=ROOT/'dist/DCA-Monitor/DCA-Monitor.exe'
     with tempfile.TemporaryDirectory(prefix='dca-update-real-') as temp:
-        root=Path(temp)
+        root=Path(temp).resolve()
         local=root/'local';local.mkdir()
         env={**os.environ,'LOCALAPPDATA':str(local)}
         dm=DataManager(data_dir=root/'wallet',auto_import_legacy=False)

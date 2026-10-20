@@ -99,6 +99,8 @@ def extrair_windows(archive, destination, *, version, digest):
             total += entry.file_size
             if total > 2_000_000_000 or len(entries) > 30000:
                 raise ValueError('Pacote expandido excessivo.')
+        if package.getinfo('DCA-Monitor/distribution-manifest.json').file_size > 4_000_000:
+            raise ValueError('Manifesto excessivo.')
         manifest = json.loads(package.read('DCA-Monitor/distribution-manifest.json'))
         if manifest.get('version') != version:
             raise ValueError('Versão do manifesto não corresponde à Release.')
