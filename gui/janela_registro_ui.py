@@ -182,11 +182,13 @@ class JanelaRegistroUI(ctk.CTkFrame):
         self._entry_valor.bind("<KeyRelease>", self._on_calcular)
         self._lbl_quantidade = badge(8, TEXT_SECONDARY)
 
-        label(9, "TAXA CORRET. USDT")
+        label(9, "TAXA CORRET. USDT *")
         self._entry_taxa_corretagem = entry(9)
         self._entry_taxa_corretagem.configure(state="disabled")
         self._lbl_taxa_info = badge(9, TEXT_SECONDARY)
-        self._lbl_taxa_info.configure(text="Opcional · deixe vazio se desconhecida")
+        self._lbl_taxa_info.configure(
+            text="Obrigatória para cripto · informe 0 apenas se não houve taxa"
+        )
 
         label(10, "DATA DA OPERACAO")
         self._entry_data = entry(10)
@@ -197,7 +199,9 @@ class JanelaRegistroUI(ctk.CTkFrame):
         self._entry_cambio = entry(11)
         self._entry_cambio.configure(placeholder_text="ex: 5,26")
         self._lbl_cambio_info = badge(11)
-        self._lbl_cambio_info.configure(text="Vazio = cotação de agora")
+        self._lbl_cambio_info.configure(
+            text="Vazio = cotação Binance recente; data antiga exige câmbio real"
+        )
 
         self._lbl_ajuda = ctk.CTkLabel(p, text="", font=_F_CARD_SUB,
                                        text_color=CYAN, anchor="w",
@@ -263,7 +267,8 @@ class JanelaRegistroUI(ctk.CTkFrame):
     def get_cambio_str(self) -> str:
         return self._entry_cambio.get().strip()
 
-    def set_cambio_state(self, state: str, info: str = "Vazio = cotação de agora") -> None:
+    def set_cambio_state(self, state: str,
+                         info: str = "Vazio = cotação Binance recente; data antiga exige câmbio real") -> None:
         self._entry_cambio.configure(state="normal")
         self._entry_cambio.delete(0, "end")
         self._entry_cambio.configure(state=state)

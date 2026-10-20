@@ -195,10 +195,65 @@ class PriceManager:
         )
         self._brl_falhou = True
 
+    def _registrar_ticker(self, moeda: str, ticker: dict, instante: datetime) -> bool:
+        """Accept one quoted asset only when Binance returned a real last price."""
+        preco = self._preco_positivo((ticker or {}).get("last"))
+        if preco is None:
+            self.falhas_cotacao.add(moeda)
+            logger.warning("Cotação %s indisponível (ticker inválido)", moeda)
+            return False
+        self.precos_cache[moeda] = preco
+        self.cotacoes_atualizadas_em[moeda] = instante
+        self.falhas_cotacao.discard(moeda)
+        return True
+
+    def _atualizar_precos_em_lote(self, moedas: List[str]) -> bool:
+        """Fetch all requested market prices in one Binance request.
+
+        The sequential CCXT fallback exists only for exchanges that do not
+        implement ``fetch_tickers``.  A failed batch must fail closed instead
+        of turning one network timeout into a long series of timeouts.
+        """
+        ativos = list(dict.fromkeys(
+            moeda.upper() for moeda in moedas if moeda.upper() != "USDT"
+        ))
+        simbolos = [f"{moeda}/USDT" for moeda in ativos] + ["USDT/BRL"]
+        try:
+            tickers = self.exchange.fetch_tickers(simbolos)
+        except Exception as exc:
+            self.invalidar_cotacoes(ativos)
+            logger.warning("Lote de cotações Binance indisponível: %s", exc)
+            return False
+
+        instante = datetime.now(timezone.utc)
+        sucesso = True
+        for moeda in ativos:
+            if not self._registrar_ticker(moeda, tickers.get(f"{moeda}/USDT"), instante):
+                sucesso = False
+
+        preco_brl = self._preco_positivo((tickers.get("USDT/BRL") or {}).get("last"))
+        if preco_brl is None:
+            self._brl_falhou = True
+            sucesso = False
+            logger.warning("USDT/BRL indisponível (ticker de lote inválido)")
+        else:
+            self.preco_brl = preco_brl
+            self._brl_atualizado_em = instante
+            self._brl_falhou = False
+        return sucesso
+
     def atualizar_precos(self, moedas: List[str]) -> bool:
         if not self.exchange:
             self.invalidar_cotacoes(moedas)
             return False
+
+        recursos = getattr(self.exchange, "has", {}) or {}
+        if recursos.get("fetchTickers") and callable(
+                getattr(self.exchange, "fetch_tickers", None)):
+            sucesso = self._atualizar_precos_em_lote(moedas)
+            if sucesso:
+                self.ultima_atualizacao = datetime.now(timezone.utc)
+            return sucesso
 
         sucesso = True
         for moeda in moedas:
@@ -208,12 +263,8 @@ class PriceManager:
                 continue
             try:
                 ticker = self.exchange.fetch_ticker(f"{moeda}/USDT")
-                preco = self._preco_positivo(ticker.get("last"))
-                if preco is None:
-                    raise ValueError("ticker sem cotação positiva/finita")
-                self.precos_cache[moeda] = preco
-                self.cotacoes_atualizadas_em[moeda] = datetime.now(timezone.utc)
-                self.falhas_cotacao.discard(moeda)
+                if not self._registrar_ticker(moeda, ticker, datetime.now(timezone.utc)):
+                    sucesso = False
             except Exception as exc:
                 self.falhas_cotacao.add(moeda)
                 sucesso = False

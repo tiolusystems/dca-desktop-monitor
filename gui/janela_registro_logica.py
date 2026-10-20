@@ -280,7 +280,7 @@ class JanelaRegistro(JanelaRegistroUI):
         except InvalidOperation:
             self.set_btn_salvar_state("disabled")
 
-    def _validar(self) -> list:
+    def _validar(self, agora: datetime) -> list:
         erros = []
         if not self.get_moeda():
             erros.append("Selecione uma moeda")
@@ -297,6 +297,10 @@ class JanelaRegistro(JanelaRegistroUI):
         except InvalidOperation:
             erros.append("Preço deve ser um número válido")
         taxa_texto = self.get_taxa_corretagem_str()
+        if not self._eh_stablecoin(self.get_moeda()) and not taxa_texto:
+            erros.append(
+                "Informe a taxa de corretagem em USDT; use 0 apenas se a ordem não teve taxa."
+            )
         if taxa_texto:
             try:
                 taxa = Decimal(taxa_texto)
@@ -307,7 +311,7 @@ class JanelaRegistro(JanelaRegistroUI):
             if self._eh_stablecoin(self.get_moeda()):
                 erros.append("Taxa de corretagem somente para compra/venda de criptoativos.")
         try:
-            interpretar_data_operacao(self.get_data_str(), datetime.now())
+            interpretar_data_operacao(self.get_data_str(), agora)
         except ValueError as exc:
             erros.append(str(exc))
         if not self._eh_stablecoin(self.get_moeda()):
@@ -317,8 +321,24 @@ class JanelaRegistro(JanelaRegistroUI):
                 erros.append(str(exc))
         return erros
 
+    def _cambio_brl_recente(self) -> Decimal | None:
+        """Return only a fresh market snapshot suitable for a new same-day entry."""
+        obter = getattr(self._price_manager, "taxa_brl_para_avaliacao", None)
+        try:
+            taxa = obter(max_age=30) if callable(obter) else self._price_manager.preco_brl
+        except TypeError:
+            # Compatibility with the small test/dummy managers used by older UI code.
+            taxa = obter() if callable(obter) else self._price_manager.preco_brl
+        if taxa is None:
+            return None
+        try:
+            return interpretar_cambio(str(taxa))
+        except ValueError:
+            return None
+
     def _salvar(self) -> None:
-        erros = self._validar()
+        agora = datetime.now()
+        erros = self._validar(agora)
         if erros:
             messagebox.showerror("Erro de Validação", "\n".join(erros))
             return
@@ -329,14 +349,24 @@ class JanelaRegistro(JanelaRegistroUI):
             tipo_csv = tipo.csv_value
             valor = Decimal(self.get_valor_str())
             preco = Decimal(self.get_preco_str())
-            taxa_brl = (
-                preco if self._eh_stablecoin(moeda)
-                else interpretar_cambio(self.get_cambio_str()) or (
-                    self._price_manager.taxa_brl_para_avaliacao()
-                    if hasattr(self._price_manager, "taxa_brl_para_avaliacao")
-                    else self._price_manager.preco_brl
-                ) or Decimal("0")
-            )
+            data_hora = interpretar_data_operacao(self.get_data_str(), agora)
+            if self._eh_stablecoin(moeda):
+                taxa_brl = preco
+            else:
+                taxa_brl = interpretar_cambio(self.get_cambio_str())
+                if taxa_brl is None:
+                    data_operacao = datetime.strptime(data_hora, "%Y-%m-%d %H:%M:%S")
+                    if data_operacao.date() != agora.date():
+                        raise ValueError(
+                            "Informe o câmbio USDT/BRL real da data da operação. "
+                            "A cotação atual não pode substituir o histórico."
+                        )
+                    taxa_brl = self._cambio_brl_recente()
+                    if taxa_brl is None:
+                        raise ValueError(
+                            "Sem cotação Binance recente. Atualize as cotações ou informe "
+                            "o câmbio USDT/BRL da sua ordem."
+                        )
 
             if self._eh_stablecoin(moeda):
                 quantidade = valor
@@ -345,7 +375,6 @@ class JanelaRegistro(JanelaRegistroUI):
             else:
                 quantidade = valor / preco
 
-            data_hora = interpretar_data_operacao(self.get_data_str(), datetime.now())
             # Strings decimais até o SQLite: evita perda de precisão por float.
             operacao = [
                 data_hora, moeda, tipo_csv,
