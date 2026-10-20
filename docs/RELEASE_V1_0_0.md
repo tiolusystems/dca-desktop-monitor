@@ -1,8 +1,9 @@
-# DCA Monitor 1.0.0 — candidato, ainda sem publicação oficial
+# DCA Monitor 1.0.0 — guia da distribuição portátil
 
-Status: a publicação depende de F19 administrativa, revisão da integração e
-validação dos pacotes no commit final. A existência deste documento ou de um
-artefato do Actions não significa que a versão foi publicada em GitHub Releases.
+Baixe os pacotes oficiais em:
+https://github.com/tiolusystems/dca-desktop-monitor/releases/tag/v1.0.0
+Confira os nomes e as somas SHA-256 antes do uso. Arquivos temporários do Actions
+não substituem a distribuição oficial em GitHub Releases.
 
 A versão de produção deve ter apenas dois arquivos finais:
 - DCA-Monitor-v1.0.0-Windows-x64.zip
@@ -55,8 +56,9 @@ snapshot compatível em pasta isolada, reconciliando gravações posteriores.
 tag da versão, e declaração do ambiente `production`. A declaração YAML
 **não configura** revisores, proteção de tags ou ambientes no GitHub. Proteção
 de branches e de todos os workflows legados precisa de configuração
-administrativa independente e comprovação. O código não concede essa
-proteção por si só.
+administrativa e comprovação. O código não concede essa proteção por si só.
+Conforme decisão do proprietário em 20/10/2026, a operação individual utiliza
+sua aprovação explícita do SHA definitivo, sem exigir um segundo revisor.
 As operações administrativas exatas e os testes negativos estão em
 `FINALIZACAO_1_0_0_BLOQUEIOS.md`. Não usar bypass nem remover proteções para publicar.
 

@@ -40,8 +40,16 @@ class ReleaseCommitGateTests(unittest.TestCase):
                     assert not state['tag']
                     state['tag'] = os.environ['GITHUB_SHA']
                 elif args[0] == 'api':
-                    if state['tag']: print(state['tag'])
-                    else: status = 1
+                    if state.get('lookup_error'):
+                        print(json.dumps({'message': 'Resource not accessible by integration'}))
+                        print('gh: Resource not accessible by integration (HTTP 403)', file=sys.stderr)
+                        status = 1
+                    elif state['tag']: print(state['tag'])
+                    else:
+                        # gh emits the JSON error body on stdout even with --jq.
+                        print(json.dumps({'message': 'Not Found', 'status': '404'}))
+                        print('gh: Not Found (HTTP 404)', file=sys.stderr)
+                        status = 1
                 elif args[:2] == ['release', 'create']:
                     assert args[2] == 'v1.0.0'
                     assert state['tag'] == os.environ['GITHUB_SHA']
@@ -60,11 +68,13 @@ class ReleaseCommitGateTests(unittest.TestCase):
                 ("published release", "workflow_dispatch", approved, True, False),
                 ("tag event matching SHA", "push", approved, False, True),
                 ("tag event different SHA", "push", "b" * 40, False, False),
+                ("lookup forbidden", "workflow_dispatch", "", False, False),
             )
             for name, event, tag, published, accepted in cases:
                 with self.subTest(case=name):
                     state_path = root / "state.json"
-                    state_path.write_text(json.dumps(dict(tag=tag, release=published, calls=[])))
+                    state_path.write_text(json.dumps(dict(tag=tag, release=published, calls=[],
+                        lookup_error=name == "lookup forbidden")))
                     result = subprocess.run(["bash", "-c", script], cwd=ROOT,
                         env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"],
                              "FAKE_STATE": str(state_path), "GITHUB_EVENT_NAME": event,
@@ -76,6 +86,7 @@ class ReleaseCommitGateTests(unittest.TestCase):
                     if not accepted:
                         self.assertEqual(state['tag'], tag)
                         self.assertEqual(state['release'], published)
+                        self.assertFalse(any(c[:3] == ['api', '--method', 'POST'] for c in state['calls']))
 
     @unittest.skipIf(os.name == "nt", "The publication gate runs on Ubuntu/bash")
     def test_actual_gate_accepts_only_approved_current_main_and_matching_version(self):
