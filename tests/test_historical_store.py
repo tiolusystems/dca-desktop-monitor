@@ -1,5 +1,6 @@
 """Separate documentary SQLite integration, provenance and protection of operational data."""
 import csv
+from contextlib import closing
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -53,7 +54,7 @@ class LivroDocumentalTest(unittest.TestCase):
         self.assertEqual(financeiro.read_bytes(),b"BANCO-FINANCEIRO-INTACTO")
         self.assertFalse(r["sqlite_financeiro_alterado"])
         self.assertEqual(r["eventos"],1)
-        with sqlite3.connect(livro.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        with closing(sqlite3.connect(livro.resolve().as_uri()+"?mode=ro",uri=True)) as db:
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0],"ok")
             self.assertEqual(db.execute("SELECT COUNT(*) FROM eventos").fetchone()[0],1)
             stored=db.execute("SELECT payload_json FROM eventos").fetchone()[0]
