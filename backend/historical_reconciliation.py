@@ -90,7 +90,7 @@ def reconciliar_historico_documental(origem: Path) -> dict:
             fontes[src] += 1
             contagens[classe] += 1
             dia = row["data_hora"]
-            ativo = row["ativo"]
+            ativo = row["ativo"].strip().upper()
             if src == "BINANCE_TRANSACOES":
                 if not ativo:
                     raise ErroConciliacaoHistorica(f"Linha {linha_csv}: ativo Binance ausente.")
