@@ -734,6 +734,20 @@ class JanelaAplicativo(ctk.CTkToplevel):
             valor=dinheiro(row["valor_brl"],"R$ ")
             linha=f"{row['ativo']:<10} {qtd:>23}   {valor:>21}   {row['estado']}\n"
             caixa.insert("end",linha)
+            if (Decimal(row["compras_brutas_brl_binance"])>0 or
+                    Decimal(row["vendas_brutas_brl_binance"])>0):
+                caixa.insert("end",
+                    "  ↳ Binance Spot BRL, valores BRUTOS: compras "+
+                    dinheiro(row["compras_brutas_brl_binance"],"R$ ")+
+                    "; vendas "+dinheiro(row["vendas_brutas_brl_binance"],"R$ ")+
+                    " (NÃO é custo/lucro)\n")
+            if (Decimal(row["compras_brutas_brl_mp_transcricao"])>0 or
+                    Decimal(row["vendas_brutas_brl_mp_transcricao"])>0):
+                caixa.insert("end",
+                    "  ↳ Mercado Pago (transcrição), valores BRUTOS: compras "+
+                    dinheiro(row["compras_brutas_brl_mp_transcricao"],"R$ ")+
+                    "; vendas "+dinheiro(row["vendas_brutas_brl_mp_transcricao"],"R$ ")+
+                    " (taxas desconhecidas)\n")
             if row["pendencias_custodia"]:
                 for aviso in row["pendencias_custodia"]:
                     caixa.insert("end","  ↳ CONCILIAR: "+aviso+"\n")
@@ -756,7 +770,9 @@ class JanelaAplicativo(ctk.CTkToplevel):
                 return
             campos=("ativo","quantidade_documental","custodias","cotacao_atual_usdt",
                     "valor_usdt","valor_brl","estado","pendencias_custodia",
-                    "lacuna_temporal","custo_historico_brl","lucro_prejuizo_brl")
+                    "lacuna_temporal","custo_historico_brl","lucro_prejuizo_brl",
+                    "compras_brutas_brl_binance","vendas_brutas_brl_binance",
+                    "compras_brutas_brl_mp_transcricao","vendas_brutas_brl_mp_transcricao")
             try:
                 with Path(destino).open("x",encoding="utf-8-sig",newline="") as fp:
                     out=csv.DictWriter(fp,fieldnames=campos)
