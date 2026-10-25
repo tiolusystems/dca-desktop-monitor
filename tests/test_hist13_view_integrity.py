@@ -55,6 +55,8 @@ def _compile_method(name, loader):
     method=next(m for m in cls.body if isinstance(m,ast.FunctionDef) and m.name==name)
     scope={
         "carregar_historico_ativo":loader,
+        "calcular_painel_documental": lambda *a, **kw: {
+            "subtotal_avaliavel_brl": "500000.0"},
         "Decimal":Decimal,"datetime":datetime,"timezone":timezone,"Path":Path,
         "NEON_RED":"red","CYAN":"cyan","TEXT_SECONDARY":"gray",
         "ErroAtivacaoHistorica":ValueError,
