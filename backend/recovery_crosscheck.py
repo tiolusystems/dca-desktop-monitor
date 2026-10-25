@@ -39,19 +39,40 @@ def _ler_backup(pacote):
         raise ErroCruzamentoHistorico("Backup não encontrado ou excessivamente grande.")
     try:
         with zipfile.ZipFile(pacote) as z:
-            nomes={"manifest.json","portfolio.sqlite3","original.csv",
-                   "app-settings.json","user-config.json"}
+            from backend.recovery_bundle import ALLOWED, HIST_POINTER, HIST_FILE
             entradas=z.infolist()
-            if len(entradas)!=len(nomes) or {i.filename for i in entradas}!=nomes:
+            nomes={i.filename for i in entradas}
+            if (len(entradas)!=len(nomes) or
+                    not {"manifest.json","portfolio.sqlite3","original.csv"} <= nomes or
+                    any(n not in ALLOWED and n!="manifest.json"
+                        and n!=HIST_POINTER and not HIST_FILE.fullmatch(n)
+                        for n in nomes) or
+                    any(i.file_size>100_000_000 or i.is_dir() for i in entradas)
+                    or sum(i.file_size for i in entradas)>200_000_000):
                 raise ErroCruzamentoHistorico("Backup com estrutura inesperada.")
-            if any(i.file_size>100_000_000 or i.is_dir() for i in entradas):
-                raise ErroCruzamentoHistorico("Arquivo inválido ou excessivamente grande.")
             meta=json.loads(z.read("manifest.json"))
-            if meta.get("formato")!="DCA-RECOVERY-1" or meta.get("schema")!=10:
-                raise ErroCruzamentoHistorico("Formato/schema do backup inválido.")
+            if (meta.get("formato")!="DCA-RECOVERY-1" or meta.get("schema")!=10
+                    or not isinstance(meta.get("arquivos"),dict)
+                    or nomes!=set(meta["arquivos"])|{"manifest.json"}):
+                raise ErroCruzamentoHistorico("Formato/schema ou manifesto inválido.")
             for name in nomes-{"manifest.json"}:
-                if sha256(z.read(name)).hexdigest()!=meta.get("arquivos",{}).get(name):
+                if sha256(z.read(name)).hexdigest()!=meta["arquivos"].get(name):
                     raise ErroCruzamentoHistorico("Backup adulterado: "+name)
+            evidencias={n for n in nomes if n.startswith("evidencias/")}
+            if evidencias:
+                if HIST_POINTER not in evidencias:
+                    raise ErroCruzamentoHistorico("Backup com histórico sem marcador ativo.")
+                marcador=json.loads(z.read(HIST_POINTER))
+                digest=marcador.get("sha256")
+                if not isinstance(digest,str) or len(digest)!=64 or any(
+                        c not in "0123456789abcdef" for c in digest):
+                    raise ErroCruzamentoHistorico("SHA do histórico de backup inválido.")
+                esperado={HIST_POINTER,
+                          f"evidencias/historico-{digest}.csv",
+                          f"evidencias/historico-{digest}.json"}
+                if evidencias!=esperado or sha256(z.read(
+                        f"evidencias/historico-{digest}.csv")).hexdigest()!=digest:
+                    raise ErroCruzamentoHistorico("Histórico documental do backup incompleto.")
             db_bytes=z.read("portfolio.sqlite3")
             csv_bytes=z.read("original.csv")
     except (zipfile.BadZipFile,OSError,KeyError,ValueError,
