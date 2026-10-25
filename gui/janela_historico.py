@@ -429,6 +429,18 @@ class JanelaHistorico(ctk.CTkFrame):
             revalidar_snapshot_rapido(self._data_dir, self._snapshot)
             os.link(temporario, destino)  # Exclusive: never replace an existing export.
         except Exception as exc:
+            if isinstance(exc, HistoricoMudouDuranteConsulta):
+                self._painel = None
+                self._origem = None
+                self._snapshot = None
+                self.summary.configure(
+                    text="Fonte documental alterada: resultado e exportação bloqueados."
+                )
+                self.status.configure(
+                    text="Documento alterado durante a exportação; recarregue.",
+                    text_color=NEON_RED,
+                )
+                self._escrever("Nenhuma avaliação histórica pode ser mostrada.")
             messagebox.showerror("Arquivo não exportado", str(exc),
                                  parent=self.winfo_toplevel())
             return
