@@ -98,7 +98,8 @@ class PortfolioDCA:
         self.janela.after(1800, self._preparar_primeiro_atalho)
         if (not self.data_manager.carregar_operacoes_precisas()
                 and not self.data_manager.carregar_posicoes_iniciais()
-                and not self.data_manager.carregar_posicoes_externas()):
+                and not self.data_manager.carregar_posicoes_externas()
+                and not getattr(self, "_historico_ativado", False)):
             self.janela.after(500, self._abrir_primeiro_uso)
         # A GUI já pode consultar os dados locais neste ponto.
         # Binance nunca bloqueia a inicialização do aplicativo.
@@ -341,13 +342,19 @@ class PortfolioDCA:
         )
         _embutir(self.aba_moedas)
 
+        self._historico_ativado = False
         try:
             from backend.historical_activation import carregar_historico_ativo
-            if carregar_historico_ativo(self.data_manager._store.diretorio) is not None:
+            self._historico_ativado = (
+                carregar_historico_ativo(self.data_manager._store.diretorio)
+                is not None
+            )
+            if self._historico_ativado:
                 self.tabview.set("📚  Histórico integral")
             else:
                 self.tabview.set("📈  Dashboard Geral")
         except Exception as exc:
+            self.tabview.set("📚  Histórico integral")
             logger.warning("Histórico não ativado por erro de integridade: %s", exc)
 
         self.janela.after(0, self._aplicar_cursor_abas)
