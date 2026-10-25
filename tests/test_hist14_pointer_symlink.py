@@ -5,12 +5,14 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from backend.historical_activation import ErroAtivacaoHistorica, carregar_historico_ativo
+from backend.recovery_bundle import _historico_ativo_para_pacote
 
 
 class HistoricalPointerSymlinkTests(TestCase):
     def test_absent_pointer_still_means_no_active_history(self):
         with TemporaryDirectory() as root:
             self.assertIsNone(carregar_historico_ativo(root))
+            self.assertEqual(_historico_ativo_para_pacote(root), {})
 
     def test_broken_symlink_cannot_be_mistaken_for_no_history(self):
         with TemporaryDirectory() as root:
@@ -24,6 +26,9 @@ class HistoricalPointerSymlinkTests(TestCase):
             self.assertTrue(pointer.is_symlink())
             with self.assertRaisesRegex(ErroAtivacaoHistorica, "link simbólico"):
                 carregar_historico_ativo(root)
+            # Recovery export must fail rather than produce a wallet-only ZIP.
+            with self.assertRaisesRegex(ErroAtivacaoHistorica, "link simbólico"):
+                _historico_ativo_para_pacote(root)
 
     def test_symlink_rejected_even_when_target_exists(self):
         with TemporaryDirectory() as root:
