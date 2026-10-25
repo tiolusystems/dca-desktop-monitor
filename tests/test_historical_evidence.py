@@ -1,5 +1,6 @@
 """Historical documentary evidence must never mutate the operational SQLite."""
 import csv
+import json
 import os
 from unittest.mock import patch
 from hashlib import sha256
@@ -125,6 +126,75 @@ class HistoricoDocumentalTest(unittest.TestCase):
         self.assertTrue(retomado["ja_arquivado"])
         self.assertEqual(destino.read_bytes(), self.csv.read_bytes())
         self.assertTrue((dados / "evidencias" / f"historico-{sha}.json").exists())
+
+    def test_manifesto_json_adulterado_recusado_sem_tocar_wallet(self):
+        _write(self.csv, [_row()])
+        dados = self.root / "dados"
+        dados.mkdir()
+        wallet = dados / "portfolio.sqlite3"
+        wallet.write_bytes(b"ORIGINAL-NAO-MODIFICAR")
+        sha = validar_historico_documental(self.csv)["sha256"]
+        arquivar_historico_documental(self.csv, dados, sha)
+        meta = dados / "evidencias" / f"historico-{sha}.json"
+        original = json.loads(meta.read_text(encoding="utf-8"))
+        original["quantidade"] = 999
+        meta.write_text(json.dumps(original), encoding="utf-8")
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "não corresponde"):
+            arquivar_historico_documental(self.csv, dados, sha)
+        self.assertEqual(wallet.read_bytes(), b"ORIGINAL-NAO-MODIFICAR")
+        self.assertEqual(
+            (dados / "evidencias" / f"historico-{sha}.csv").read_bytes(),
+            self.csv.read_bytes(),
+        )
+
+    def test_manifesto_json_corrompido_recusado_sem_regravar_evidencia(self):
+        _write(self.csv, [_row()])
+        dados = self.root / "dados"
+        dados.mkdir()
+        sha = validar_historico_documental(self.csv)["sha256"]
+        arquivar_historico_documental(self.csv, dados, sha)
+        meta = dados / "evidencias" / f"historico-{sha}.json"
+        meta.write_text("{json incompleto", encoding="utf-8")
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "inválido"):
+            arquivar_historico_documental(self.csv, dados, sha)
+        self.assertEqual(
+            (dados / "evidencias" / f"historico-{sha}.csv").read_bytes(),
+            self.csv.read_bytes(),
+        )
+
+    def test_mesmo_csv_de_outra_pasta_reaproveita_manifesto_original(self):
+        _write(self.csv, [_row()])
+        dados = self.root / "dados"
+        dados.mkdir()
+        sha = validar_historico_documental(self.csv)["sha256"]
+        first = arquivar_historico_documental(self.csv, dados, sha)
+        outro = self.root / "outra-pasta"
+        outro.mkdir()
+        caminho2 = outro / "copiado.csv"
+        caminho2.write_bytes(self.csv.read_bytes())
+        second = arquivar_historico_documental(caminho2, dados, sha)
+        self.assertTrue(second["ja_arquivado"])
+        self.assertEqual(first["copia"], second["copia"])
+        self.assertEqual(Path(second["copia"]).read_bytes(), caminho2.read_bytes())
+
+    def test_manifesto_symlink_recusado_sem_seguir_destino(self):
+        _write(self.csv, [_row()])
+        dados = self.root / "dados"
+        dados.mkdir()
+        sha = validar_historico_documental(self.csv)["sha256"]
+        evidencias = dados / "evidencias"
+        evidencias.mkdir()
+        wallet = dados / "portfolio.sqlite3"
+        wallet.write_bytes(b"NAO-ESCREVER-AQUI")
+        meta = evidencias / f"historico-{sha}.json"
+        try:
+            meta.symlink_to(wallet)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink indisponível no sistema")
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "link simbólico"):
+            arquivar_historico_documental(self.csv, dados, sha)
+        self.assertEqual(wallet.read_bytes(), b"NAO-ESCREVER-AQUI")
+        self.assertFalse((evidencias / f"historico-{sha}.csv").exists())
 
     def test_modificacao_apos_previa_recusada(self):
         _write(self.csv, [_row()])
