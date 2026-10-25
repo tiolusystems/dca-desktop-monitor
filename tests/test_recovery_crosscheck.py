@@ -140,5 +140,58 @@ class BackupCrossCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(ErroCruzamentoHistorico,"Pacote"):
             auditar_backup_e_historico(self.zip,self.document)
 
+    def extend_backup_with_history(self):
+        with zipfile.ZipFile(self.zip) as z:
+            files={entry.filename:z.read(entry.filename) for entry in z.infolist()}
+        meta=json.loads(files["manifest.json"])
+        historico=self.document.read_bytes()
+        digest=sha256(historico).hexdigest()
+        pointer={
+            "schema":1,"sha256":digest,
+            "arquivo":f"historico-{digest}.csv",
+            "eventos":len(self.rows),
+            "status":"HISTORICO_DOCUMENTAL_NAO_CERTIFICADO",
+        }
+        items={
+            "evidencias/historico-ativo.json":json.dumps(pointer).encode(),
+            f"evidencias/historico-{digest}.csv":historico,
+            f"evidencias/historico-{digest}.json":json.dumps(
+                {"sha256":digest,"quantidade":len(self.rows)}).encode(),
+        }
+        files.update(items)
+        meta["arquivos"].update({
+            name:sha256(data).hexdigest() for name,data in items.items()
+        })
+        files["manifest.json"]=json.dumps(meta).encode()
+        with zipfile.ZipFile(self.zip,"w") as z:
+            for k,v in files.items():
+                z.writestr(k,v)
+        return digest
+
+    def test_crosscheck_accepts_new_recovery_with_active_document_history(self):
+        digest=self.extend_backup_with_history()
+        result=auditar_backup_e_historico(self.zip,self.document)
+        self.assertEqual(result["operacoes_sqlite"],1)
+        self.assertEqual(result["correspondencias"],1)
+        self.assertFalse(result["financeiro_alterado"])
+        with zipfile.ZipFile(self.zip) as z:
+            self.assertIn(f"evidencias/historico-{digest}.csv",z.namelist())
+
+    def test_crosscheck_refuses_incomplete_new_history_even_with_updated_hashes(self):
+        self.extend_backup_with_history()
+        with zipfile.ZipFile(self.zip) as z:
+            files={item.filename:z.read(item.filename) for item in z.infolist()}
+        extra=next(n for n in files if n.startswith("evidencias/historico-")
+                   and n.endswith(".json") and n!="evidencias/historico-ativo.json")
+        files.pop(extra)
+        metadata=json.loads(files["manifest.json"])
+        metadata["arquivos"].pop(extra)
+        files["manifest.json"]=json.dumps(metadata).encode()
+        with zipfile.ZipFile(self.zip,"w") as z:
+            for k,v in files.items():z.writestr(k,v)
+        with self.assertRaisesRegex(ErroCruzamentoHistorico,"incompleto"):
+            auditar_backup_e_historico(self.zip,self.document)
+
+
 if __name__=="__main__":
     unittest.main()
