@@ -6,6 +6,7 @@ compras fictícias, não converte PTAX para USDT, não altera portfolio.sqlite3.
 from __future__ import annotations
 
 import csv
+from contextlib import closing
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -26,7 +27,7 @@ class ErroLivroDocumental(ValueError):
 
 def _verificar_livro(arquivo: Path, hash_fonte: str, quantidade: int) -> bool:
     try:
-        with sqlite3.connect(arquivo.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        with closing(sqlite3.connect(arquivo.resolve().as_uri()+"?mode=ro",uri=True)) as db:
             ok=db.execute("PRAGMA integrity_check").fetchone()[0]
             meta=db.execute("SELECT sha256_fonte,quantidade_eventos,versao FROM manifesto").fetchone()
             count=db.execute("SELECT COUNT(*) FROM eventos").fetchone()[0]
@@ -63,7 +64,7 @@ def construir_livro_documental(origem: Path, diretorio_dados: Path) -> dict:
     os.close(fd)
     temp=Path(temp)
     try:
-        with sqlite3.connect(temp) as db:
+        with closing(sqlite3.connect(temp)) as db:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA synchronous=FULL")
             db.executescript(
