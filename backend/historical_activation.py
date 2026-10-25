@@ -35,6 +35,12 @@ def carregar_historico_ativo(diretorio_dados):
     """Retorna o CSV completo ou None; falha fechada para fonte adulterada."""
     pasta = _pasta(diretorio_dados)
     pointer = pasta / "historico-ativo.json"
+    # Um symlink quebrado responde False a exists(): sem esta checagem,
+    # a falha seria confundida com ausência legítima de histórico e o
+    # backup portátil poderia omitir silenciosamente evidências ativas.
+    # Rejeitar também symlink válido: o marcador deve ser arquivo local.
+    if pointer.is_symlink():
+        raise ErroAtivacaoHistorica("Marcador de histórico ativo é link simbólico.")
     if not pointer.exists():
         return None
     try:
