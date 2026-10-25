@@ -79,6 +79,7 @@ class ReconciliaHistoricoTest(unittest.TestCase):
                classe="CORRETAGEM_EM_ATIVO"),
             _row(linha_fonte="2", data_hora="2026-01-01 10:01:00",
                  quantidade_assinada="0.001", quantidade_executada="0.001",
+                 preco_executado="90000", valor_cotacao_executado="90",
                  taxa_quantidade="0.000001"),
         ])
         btc=self.pos(result,"BINANCE:Spot","BTC")
