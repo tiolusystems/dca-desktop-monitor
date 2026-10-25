@@ -140,6 +140,12 @@ class JanelaAplicativo(ctk.CTkToplevel):
             fg_color=BG_INPUT,command=self._conferir_historico,
         )
         self._btn_historico.pack(anchor="w",padx=12,pady=(5,12))
+        self._btn_conciliar_historico=ctk.CTkButton(
+            evidencias,text="Conferir saldos históricos e exportar CSV",
+            fg_color=BTC_ORANGE,text_color=BG_SURFACE,
+            command=self._conciliar_saldos_historicos,
+        )
+        self._btn_conciliar_historico.pack(anchor="w",padx=12,pady=(0,12))
 
         recovery=self._box(wrap,"Backup e recuperação segura do SQLite")
         self.status_backup=self._texto(
@@ -410,6 +416,70 @@ class JanelaAplicativo(ctk.CTkToplevel):
                     self._tasks.post(encerrar)
                 self._tasks.run(copiar)
             self._tasks.post(concluido)
+        self._tasks.run(worker)
+
+    def _conciliar_saldos_historicos(self):
+        """Analisar e exportar uma prévia separada, SEM substituir a carteira."""
+        origem=filedialog.askopenfilename(
+            parent=self,title="Selecione histórico documental integral",
+            filetypes=[("CSV documental","*.csv")],
+        )
+        if not origem:
+            return
+        self._btn_conciliar_historico.configure(state="disabled")
+        self.status_historico.configure(
+            text="Conciliando por ativo e custódia; nenhum saldo operacional será alterado.",
+            text_color=CYAN,
+        )
+        def worker():
+            try:
+                from backend.historical_reconciliation import reconciliar_historico_documental
+                result=reconciliar_historico_documental(Path(origem))
+                error=None
+            except Exception as exc:
+                result,error=None,str(exc)
+            def done():
+                if not self.winfo_exists():
+                    return
+                self._btn_conciliar_historico.configure(state="normal")
+                if error:
+                    self.status_historico.configure(text="Conciliação recusada: "+error,text_color=NEON_RED)
+                    return
+                resumo=(
+                    f"Eventos verificados: {result['eventos_documentais']}. "
+                    f"Saldos separados: {len(result['saldos'])}. "
+                    f"Custódias com saldo negativo: {len(result['negativos_finais'])}; "
+                    f"com lacunas históricas: {len(result['negativos_em_alguma_data'])}. "
+                    "Nenhum registro do DCA foi alterado. "
+                    "Esse resultado é apenas uma PRÉVIA documental."
+                )
+                self.status_historico.configure(
+                    text=resumo,text_color=NEON_RED if result['negativos_finais'] else CYAN,
+                )
+                if not messagebox.askyesno(
+                    "Exportar prévia documental",
+                    resumo+"\\n\\nDeseja salvar o CSV de saldos para conferência? "
+                    "Ele NÃO será importado nem alterará sua carteira.",parent=self,
+                ):
+                    return
+                destino=filedialog.asksaveasfilename(
+                    parent=self,title="Salvar relatório separado de saldos",
+                    initialfile="DCA-saldos-historicos-CONFERIR.csv",
+                    defaultextension=".csv",filetypes=[("CSV de relatório","*.csv")],
+                    confirmoverwrite=False,
+                )
+                if not destino:
+                    return
+                try:
+                    from backend.historical_reconciliation import exportar_saldos_documentais
+                    salvo=exportar_saldos_documentais(result,Path(destino))
+                    self.status_historico.configure(
+                        text=resumo+" Relatório separado: "+str(salvo),
+                        text_color=NEON_RED if result["negativos_finais"] else CYAN,
+                    )
+                except Exception as exc:
+                    messagebox.showerror("CSV não exportado",str(exc),parent=self)
+            self._tasks.post(done)
         self._tasks.run(worker)
 
     def _verificar_backups(self):
