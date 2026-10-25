@@ -69,6 +69,11 @@ class JanelaHistorico(ctk.CTkFrame):
             fg_color=BG_INPUT,
         )
         self.btn_export.pack(side="left", padx=6)
+        self.btn_events = ctk.CTkButton(
+            controls, text="Consultar lançamentos históricos",
+            command=self.consultar_lancamentos, fg_color=BG_INPUT,
+        )
+        self.btn_events.pack(side="left", padx=6)
         self.summary = ctk.CTkLabel(
             self, text="Nenhum patrimônio foi modificado.",
             text_color=CYAN, anchor="w", justify="left", wraplength=1020,
@@ -105,6 +110,7 @@ class JanelaHistorico(ctk.CTkFrame):
         self.btn_import.configure(state="disabled")
         self.btn_update.configure(state="disabled")
         self.btn_export.configure(state="disabled")
+        self.btn_events.configure(state="disabled")
         self.status.configure(text=texto, text_color=CYAN)
 
     def _liberar(self):
@@ -112,6 +118,22 @@ class JanelaHistorico(ctk.CTkFrame):
         self.btn_import.configure(state="normal")
         self.btn_update.configure(state="normal")
         self.btn_export.configure(state="normal")
+        self.btn_events.configure(state="normal")
+
+    def consultar_lancamentos(self):
+        """Open independent, paginated, read-only event ledger."""
+        existente = getattr(self, "_janela_eventos", None)
+        if existente is not None and existente.winfo_exists():
+            existente.deiconify()
+            existente.lift()
+            existente.focus_force()
+            return
+        from gui.janela_historico_eventos import JanelaConsultaHistorica
+        self._janela_eventos = JanelaConsultaHistorica(
+            self.winfo_toplevel(), self._data_dir,
+        )
+        self._janela_eventos.lift()
+        self._janela_eventos.focus_force()
 
     def escolher_historico(self):
         if self._busy:
