@@ -51,7 +51,7 @@ def _ler_backup(pacote):
                     or sum(i.file_size for i in entradas)>200_000_000):
                 raise ErroCruzamentoHistorico("Backup com estrutura inesperada.")
             meta=json.loads(z.read("manifest.json"))
-            if (meta.get("formato")!="DCA-RECOVERY-1" or meta.get("schema")!=10
+            if (not isinstance(meta,dict) or meta.get("formato")!="DCA-RECOVERY-1" or meta.get("schema")!=10
                     or not isinstance(meta.get("arquivos"),dict)
                     or nomes!=set(meta["arquivos"])|{"manifest.json"}):
                 raise ErroCruzamentoHistorico("Formato/schema ou manifesto inválido.")
@@ -63,6 +63,8 @@ def _ler_backup(pacote):
                 if HIST_POINTER not in evidencias:
                     raise ErroCruzamentoHistorico("Backup com histórico sem marcador ativo.")
                 marcador=json.loads(z.read(HIST_POINTER))
+                if not isinstance(marcador,dict):
+                    raise ErroCruzamentoHistorico("Marcador histórico inválido.")
                 digest=marcador.get("sha256")
                 if not isinstance(digest,str) or len(digest)!=64 or any(
                         c not in "0123456789abcdef" for c in digest):
@@ -73,10 +75,22 @@ def _ler_backup(pacote):
                 if evidencias!=esperado or sha256(z.read(
                         f"evidencias/historico-{digest}.csv")).hexdigest()!=digest:
                     raise ErroCruzamentoHistorico("Histórico documental do backup incompleto.")
+                # A estrutura e os hashes do ZIP, isoladamente, nao provam que
+                # o historico pode ser recuperado. Exercitar o mesmo contrato
+                # de reconstrucao usado pela recuperacao oficial, exclusivamente
+                # em pasta temporaria. Nenhum dado operacional e modificado.
+                from backend.recovery_bundle import _restaurar_historico_no_staging
+                with tempfile.TemporaryDirectory(prefix="dca-crosscheck-history-") as tmp:
+                    stage=Path(tmp)
+                    for nome in sorted(evidencias):
+                        arquivo=stage/nome
+                        arquivo.parent.mkdir(parents=True,exist_ok=True)
+                        arquivo.write_bytes(z.read(nome))
+                    _restaurar_historico_no_staging(stage,evidencias)
             db_bytes=z.read("portfolio.sqlite3")
             csv_bytes=z.read("original.csv")
-    except (zipfile.BadZipFile,OSError,KeyError,ValueError,
-            json.JSONDecodeError) as exc:
+    except (zipfile.BadZipFile,OSError,KeyError,ValueError,RuntimeError,
+            sqlite3.DatabaseError,json.JSONDecodeError) as exc:
         raise ErroCruzamentoHistorico("Pacote de recuperação inválido.") from exc
     with tempfile.TemporaryDirectory(prefix="dca-recovery-audit-") as tmp:
         dbfile=Path(tmp)/"readonly.sqlite3"
