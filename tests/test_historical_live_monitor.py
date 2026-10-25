@@ -1,5 +1,8 @@
 """Tests for conservative, read-only documentary portfolio valuation."""
 from pathlib import Path
+from collections import defaultdict
+import csv
+import tempfile
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -19,7 +22,12 @@ def saldo(ativo, qtd, custodia="BINANCE:Spot", status="SALDO_DERIVADO_NAO_CERTIF
 class PainelDocumentalTest(TestCase):
     def calculate(self, result, quotes=None, fx=None):
         with patch("backend.historical_live_monitor.reconciliar_historico_documental",
-                   return_value=result):
+                   return_value=result), patch(
+                       "backend.historical_live_monitor._fluxos_brl_documentados",
+                       return_value=defaultdict(lambda: {
+                           "binance_compra": 0, "binance_venda": 0,
+                           "mp_compra_transcrita": 0, "mp_venda_transcrita": 0
+                       })):
             return calcular_painel_documental(
                 Path("NAO_ABRIR_ORIGEM"), cotacoes_usdt=quotes,
                 cambio_usdt_brl=fx, instante_cotacoes="2026-10-24T12:00:00+00:00")
@@ -84,3 +92,34 @@ class PainelDocumentalTest(TestCase):
         self.assertEqual(r["ativos"][0]["valor_usdt"], "0")
         self.assertEqual(r["ativos"][0]["estado"], "SEM_POSICAO_DOCUMENTAL")
         self.assertEqual(r["lucro_brl_consolidado"], None)
+
+    def test_apuracao_brl_nao_conta_transferencia_como_venda(self):
+        from backend.historical_live_monitor import _fluxos_brl_documentados
+        from backend.historical_evidence import COLUNAS
+        with tempfile.TemporaryDirectory() as root:
+            origem=Path(root)/"movimentos.csv"
+            def row(**kwargs):
+                base={key:"" for key in COLUNAS}
+                base.update(kwargs)
+                return base
+            linhas=[
+                row(fonte="BINANCE_SPOT", ativo="BTC", moeda_cotacao="BRL",
+                    lado="BUY",valor_cotacao_executado="1200"),
+                row(fonte="BINANCE_SPOT", ativo="BTC", moeda_cotacao="BRL",
+                    lado="SELL",valor_cotacao_executado="800"),
+                row(fonte="MERCADO_PAGO_TRANSCRITO",ativo="BTC",
+                    classe_evidencia="COMPRA_BTC_BRL_TRANSCRITA",
+                    valor_brl_documentado="1900"),
+                row(fonte="MERCADO_PAGO_TRANSCRITO",ativo="BTC",
+                    classe_evidencia="TRANSFERENCIA_BTC_EXTERNA_TRANSCRITA",
+                    valor_brl_documentado="2200"),
+            ]
+            with origem.open("w",encoding="utf-8-sig",newline="") as f:
+                writer=csv.DictWriter(f,fieldnames=COLUNAS)
+                writer.writeheader()
+                writer.writerows(linhas)
+            result=_fluxos_brl_documentados(origem)
+            self.assertEqual(result["BTC"]["binance_compra"],1200)
+            self.assertEqual(result["BTC"]["binance_venda"],800)
+            self.assertEqual(result["BTC"]["mp_compra_transcrita"],1900)
+            self.assertEqual(result["BTC"]["mp_venda_transcrita"],0)
