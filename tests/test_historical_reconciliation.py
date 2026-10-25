@@ -3,7 +3,39 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tests.test_historical_evidence import _row, _write
+import csv
+from hashlib import sha256
+from backend.historical_evidence import COLUNAS
+
+
+def _row(**changes):
+    base={key:"" for key in COLUNAS}
+    base.update({
+        "data_hora":"2026-01-31 15:35:21","fonte":"BINANCE_SPOT",
+        "arquivo_fonte_sha256":"a"*64,"linha_fonte":"2",
+        "classe_evidencia":"EXECUCAO_SPOT",
+        "impacto_saldo":"NAO_SOMAR_DUPLICA_LANCAMENTO_BINANCE",
+        "conta":"Spot","operacao_origem":"Trade Spot",
+        "ativo":"BTC","quantidade_assinada":"0.02553",
+        "moeda_cotacao":"USDT","par":"BTCUSDT","lado":"BUY",
+        "preco_executado":"78324.02","quantidade_executada":"0.02553",
+        "valor_cotacao_executado":"1999.6122306",
+        "taxa_quantidade":"0.00002553","taxa_moeda":"BTC",
+        "id_ordem":"order-confirmada",
+        "custo_aquisicao":"NAO_DETERMINADO_POR_ESTE_EVENTO",
+    })
+    base.update(changes)
+    sig=(f'{base["fonte"]}:{base["arquivo_fonte_sha256"]}:'
+         f'{base["linha_fonte"]}:{base["classe_evidencia"]}:{base["data_hora"]}')
+    base["id_evento"]=sha256(sig.encode()).hexdigest()[:24]
+    return base
+
+
+def _write(path,rows):
+    with Path(path).open("w",encoding="utf-8-sig",newline="") as fp:
+        writer=csv.DictWriter(fp,fieldnames=COLUNAS)
+        writer.writeheader()
+        writer.writerows(rows)
 from backend.historical_reconciliation import (
     ErroConciliacaoHistorica, reconciliar_historico_documental,
     exportar_saldos_documentais,
