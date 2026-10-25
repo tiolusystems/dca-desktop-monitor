@@ -48,7 +48,7 @@ class HistoricalPointerSymlinkTests(TestCase):
             real_is_symlink = Path.is_symlink
 
             def simulate_pointer_symlink(path):
-                return path == pointer or real_is_symlink(path)
+                return (path.name == pointer.name and path.parent.name == "evidencias") or real_is_symlink(path)
 
             with patch.object(Path, "is_symlink", simulate_pointer_symlink):
                 with self.assertRaisesRegex(ErroAtivacaoHistorica, "link simbólico"):
