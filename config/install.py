@@ -125,7 +125,7 @@ def install_windows(*, executavel=None, anterior=None, desktop=None) -> dict:
             "status": "Atalho criado e verificado."}
 
 
-def install_menu_iniciar_windows(*, executavel=None, anterior=None, menu_iniciar=None) -> dict:
+def install_menu_iniciar_windows(*, executavel=None, anterior=None, menu_iniciar=None, somente_se_existente=False) -> dict:
     """Create or refresh only DCA's own shortcut in the current user's Start Menu."""
     if menu_iniciar is None:
         localizacao = _powershell(
@@ -135,6 +135,16 @@ def install_menu_iniciar_windows(*, executavel=None, anterior=None, menu_iniciar
         if not pasta:
             raise RuntimeError("O Windows não informou a pasta do Menu Iniciar.")
         menu_iniciar = Path(pasta)
+    shortcut = Path(menu_iniciar) / f"{APP_NAME}.lnk"
+    # NC-05: while updating do NOT silently create an unrequested shortcut.
+    # Existing links are still evaluated by install_windows for OWNERSHIP;
+    # links belonging to other programs are never changed.
+    if somente_se_existente and not shortcut.is_file():
+        return {
+            "criado": False, "proprio": False, "ignorado": True,
+            "atalho": str(shortcut),
+            "status": "Menu Iniciar não tinha atalho DCA gerenciado; preservado.",
+        }
     resultado = install_windows(
         executavel=executavel, anterior=anterior, desktop=Path(menu_iniciar)
     )
