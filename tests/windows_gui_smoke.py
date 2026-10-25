@@ -91,6 +91,36 @@ def main():
                 app._after_id = None
             root.update_idletasks()
             pump(root)
+            # HIST-PRIMARY-05: a aba documental é realmente montada e
+            # não oculta o dashboard legado quando nenhum CSV foi ativado.
+            assert app.tabview.get() == "📈  Dashboard Geral", app.tabview.get()
+            hist_tab = app.aba_historico
+            assert hist_tab.winfo_exists()
+            app.tabview.set("📚  Histórico integral")
+            root.update_idletasks()
+            pump(root)
+            assert hist_tab.winfo_width() > 200, hist_tab.winfo_width()
+            from backend.historical_evidence import COLUNAS
+            from backend.historical_live_monitor import calcular_painel_documental
+            from test_historical_activation import row as historical_row
+            import csv
+            arquivo_hist = Path(pasta) / "historico-sintetico.csv"
+            with arquivo_hist.open("w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=COLUNAS)
+                writer.writeheader()
+                writer.writerows([historical_row(0, "0.5"), historical_row(1, "0.1")])
+            painel = calcular_painel_documental(
+                arquivo_hist, cotacoes_usdt={"BTC": 60000},
+                cambio_usdt_brl=5, instante_cotacoes="2026-10-24T22:00:00+00:00",
+            )
+            hist_tab._exibir(painel)
+            assert "180.000,00" in hist_tab.summary.cget("text"), hist_tab.summary.cget("text")
+            assert "BTC" in hist_tab.table.get("1.0", "end")
+            assert "NÃO" in hist_tab.notice.cget("text")
+            app.tabview.set("📈  Dashboard Geral")
+            root.update_idletasks()
+            pump(root)
+            print("GUI_HIST_PRIMARY_TAB_REAL=PASS")
             tab = app.tabview.tab("📊  Análise por Período")
             assert tab.winfo_exists(), "Aba de análise financeira não foi montada."
             app.aba_analise.atualizar()

@@ -26,6 +26,7 @@ from gui.janela_moedas import JanelaMoedas
 from gui.janela_analise_periodo import JanelaAnalisePeriodo
 from gui.janela_primeiro_uso import JanelaPrimeiroUso
 from gui.janela_aplicativo import JanelaAplicativo
+from gui.janela_historico import JanelaHistorico
 from backend.ui_dispatch import UiDispatcher
 from backend.app_lifecycle import carregar_preferencias
 from backend.tray_windows import BandejaWindows, ErroBandeja
@@ -47,6 +48,7 @@ CONFIG            = _carregar_config()
 MOEDAS_SUPORTADAS = CONFIG["moedas"]
 
 ABAS = [
+    ("📚  Histórico integral",    "aba_historico"),
     ("📈  Dashboard Geral",      "aba_distribuicao"),
     ("📊  Análise por Período",   "aba_analise"),
     ("💰  Caixa (USD/BRL)",         "aba_caixa"),
@@ -96,7 +98,8 @@ class PortfolioDCA:
         self.janela.after(1800, self._preparar_primeiro_atalho)
         if (not self.data_manager.carregar_operacoes_precisas()
                 and not self.data_manager.carregar_posicoes_iniciais()
-                and not self.data_manager.carregar_posicoes_externas()):
+                and not self.data_manager.carregar_posicoes_externas()
+                and not getattr(self, "_historico_ativado", False)):
             self.janela.after(500, self._abrir_primeiro_uso)
         # A GUI já pode consultar os dados locais neste ponto.
         # Binance nunca bloqueia a inicialização do aplicativo.
@@ -294,6 +297,11 @@ class PortfolioDCA:
         def _embutir(frame):
             frame.grid(row=0, column=0, sticky="nsew")
 
+        self.aba_historico = JanelaHistorico(
+            self.tabview.tab("📚  Histórico integral"), self.data_manager,
+        )
+        _embutir(self.aba_historico)
+
         self.aba_distribuicao = JanelaDistribuicao(
             self.tabview.tab("📈  Dashboard Geral"),
             self.data_manager, self.price_manager, self.analysis_engine,
@@ -333,6 +341,21 @@ class PortfolioDCA:
             price_manager=self.price_manager,
         )
         _embutir(self.aba_moedas)
+
+        self._historico_ativado = False
+        try:
+            from backend.historical_activation import carregar_historico_ativo
+            self._historico_ativado = (
+                carregar_historico_ativo(self.data_manager._store.diretorio)
+                is not None
+            )
+            if self._historico_ativado:
+                self.tabview.set("📚  Histórico integral")
+            else:
+                self.tabview.set("📈  Dashboard Geral")
+        except Exception as exc:
+            self.tabview.set("📚  Histórico integral")
+            logger.warning("Histórico não ativado por erro de integridade: %s", exc)
 
         self.janela.after(0, self._aplicar_cursor_abas)
 
