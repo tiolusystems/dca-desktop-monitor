@@ -1,5 +1,6 @@
 """Historical portfolio activation must keep the original wallet byte-for-byte."""
 import csv
+from contextlib import closing
 from hashlib import sha256
 from pathlib import Path
 import sqlite3
@@ -59,7 +60,7 @@ class HistoricalActivationTests(unittest.TestCase):
         self.assertEqual(self.wallet.read_bytes(),original)
         ativo=carregar_historico_ativo(self.dados)
         self.assertEqual(ativo.read_bytes(),self.csv.read_bytes())
-        with sqlite3.connect(result["livro"]) as db:
+        with closing(sqlite3.connect(result["livro"])) as db:
             self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0],"ok")
             self.assertEqual(db.execute("SELECT COUNT(*) FROM eventos").fetchone()[0],2)
             self.assertEqual(db.execute(
