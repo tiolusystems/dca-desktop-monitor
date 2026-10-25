@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import os
+import tempfile
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -395,24 +397,58 @@ class JanelaHistorico(ctk.CTkFrame):
         )
         if not destino:
             return
-        fields = ["ativo", "quantidade_documental", "custodias", "valor_usdt",
+        fields = ["fonte_sha256", "versao_aplicativo", "instante_cotacoes_utc",
+                  "cambio_usdt_brl_atual", "tipo_relatorio",
+                  "ativo", "quantidade_documental", "custodias", "valor_usdt",
                   "valor_brl", "estado", "pendencias_custodia", "lacuna_temporal",
                   "custo_historico_brl", "lucro_prejuizo_brl",
                   "compras_brutas_brl_binance", "vendas_brutas_brl_binance",
                   "compras_brutas_brl_mp_transcricao", "vendas_brutas_brl_mp_transcricao"]
+        temporario = None
         try:
-            with Path(destino).open("x", encoding="utf-8-sig", newline="") as fp:
+            from backend.app_lifecycle import APP_VERSION
+            # PR #49 validates once before picker; NC-06 needs another
+            # validation after a long-running save dialog as well.
+            fonte = carregar_historico_ativo(self._data_dir)
+            if fonte is None or fonte != self._origem:
+                raise ErroAtivacaoHistorica("Fonte mudou durante a exportação.")
+            destino = Path(destino).expanduser().resolve()
+            if destino.exists():
+                raise FileExistsError("Relatório de destino já existe.")
+            with tempfile.NamedTemporaryFile(
+                    mode="w", dir=destino.parent, prefix=".dca-export-",
+                    suffix=".csv", encoding="utf-8-sig", newline="",
+                    delete=False) as fp:
+                temporario = Path(fp.name)
                 writer = csv.DictWriter(fp, fieldnames=fields)
                 writer.writeheader()
                 for item in self._painel["ativos"]:
-                    entry = {key: item[key] for key in fields}
+                    entry = {key:item.get(key) for key in fields}
+                    entry.update(
+                        fonte_sha256=self._painel["fonte_sha256"],
+                        versao_aplicativo=APP_VERSION,
+                        instante_cotacoes_utc=self._painel.get("instante_cotacoes_utc") or "",
+                        cambio_usdt_brl_atual=self._painel.get("cambio_atual_usdt_brl") or "",
+                        tipo_relatorio="SNAPSHOT_DOCUMENTAL_NAO_CERTIFICADO_NAO_IMPORTAR",
+                    )
                     for key in ("custodias", "pendencias_custodia"):
                         entry[key] = json.dumps(entry[key], ensure_ascii=False)
                     writer.writerow(entry)
+                fp.flush()
+                os.fsync(fp.fileno())
+            os.link(temporario, destino)  # publish only complete CSV; no overwrite
         except Exception as exc:
+            if isinstance(exc, ErroAtivacaoHistorica):
+                self._origem = None
+                self._painel = None
+                self.summary.configure(text="Relatório invalidado por integridade documental.")
+                self._escrever("Documento alterado durante exportação; valores bloqueados.")
             messagebox.showerror("Arquivo não exportado", str(exc),
                                  parent=self.winfo_toplevel())
             return
+        finally:
+            if temporario is not None:
+                temporario.unlink(missing_ok=True)
         messagebox.showinfo("Exportação concluída",
                             "Relatório de conferência criado. "
                             "O banco financeiro não foi modificado.",
