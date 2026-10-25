@@ -14,6 +14,7 @@ import tempfile
 
 from backend.historical_evidence import (
     validar_historico_documental, arquivar_historico_documental,
+    _verificar_manifesto_arquivado,
 )
 from backend.historical_store import construir_livro_documental, _verificar_livro
 
@@ -52,6 +53,12 @@ def carregar_historico_ativo(diretorio_dados):
             raise ErroAtivacaoHistorica("Histórico documental modificado após a ativação.")
         if not livro.is_file() or not _verificar_livro(livro, chave, payload["eventos"], fonte=caminho):
             raise ErroAtivacaoHistorica("Livro histórico ausente ou com integridade inválida.")
+        # A fonte só é ativa se seu manifesto documental também continuar
+        # íntegro. Um JSON editado após a importação não pode ser ignorado.
+        _verificar_manifesto_arquivado(
+            pasta / f"historico-{chave}.json",
+            validar_historico_documental(caminho),
+        )
         return caminho
     except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
         if isinstance(exc, ErroAtivacaoHistorica):
