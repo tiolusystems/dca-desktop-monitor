@@ -83,10 +83,21 @@ def calcular_painel_documental(arquivo_csv: Path, *, cotacoes_usdt=None,
         item["saldo"] += qtd
         item["custodias"][conta] = str(qtd)
         if qtd < ZERO:
-            item["pendencias"].append(f"{conta}: saldo negativo")
+            item["pendencias"].append(
+                f"{conta}: saldo final negativo {qtd} {ativo}")
         if row["status"] in ("HISTORICO_COM_LACUNA_TEMPORAL",
                              "ORIGEM_INCOMPLETA_SALDO_NEGATIVO"):
             item["negativo_historico"] = True
+            if row["status"] == "HISTORICO_COM_LACUNA_TEMPORAL":
+                # Mesmo quando o saldo final volta a ser positivo, não
+                # ocultar a falta de lastro anterior. Datas e mínimos
+                # vêm da própria sequência documental, nunca inferidos.
+                data = row.get("data_primeiro_saldo_negativo") or "não informada"
+                minimo = row.get("menor_saldo_no_periodo")
+                descricao = f"{conta}: lacuna temporal desde {data}"
+                if minimo not in (None, ""):
+                    descricao += f"; mínimo {minimo} {ativo}"
+                item["pendencias"].append(descricao)
 
     linhas, com_lacuna = [], []
     subtotal_usdt = subtotal_brl = ZERO
