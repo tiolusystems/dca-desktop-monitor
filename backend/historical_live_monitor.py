@@ -54,7 +54,8 @@ def calcular_painel_documental(arquivo_csv: Path, *, cotacoes_usdt=None,
     linhas, com_lacuna = [], []
     subtotal_usdt = subtotal_brl = ZERO
     sem_avaliacao = 0
-    ativos_efetivamente_avaliados = 0
+    ativos_avaliados_usdt = 0
+    ativos_avaliados_brl = 0
     for ativo, item in sorted(agregado.items()):
         quantidade = item["saldo"]
         pendencia = bool(item["pendencias"]) or item["negativo_historico"] or quantidade < ZERO
@@ -78,10 +79,12 @@ def calcular_painel_documental(arquivo_csv: Path, *, cotacoes_usdt=None,
             situacao = "VALOR_DOCUMENTAL" if fx else "SEM_CAMBIO_ATUAL"
         if usdt is not None:
             subtotal_usdt += usdt
-            if quantidade > ZERO and brl is not None:
-                ativos_efetivamente_avaliados += 1
+            if quantidade > ZERO:
+                ativos_avaliados_usdt += 1
         if brl is not None:
             subtotal_brl += brl
+            if quantidade > ZERO:
+                ativos_avaliados_brl += 1
         if quantidade != ZERO and (brl is None or usdt is None):
             sem_avaliacao += 1
         linhas.append({
@@ -105,10 +108,11 @@ def calcular_painel_documental(arquivo_csv: Path, *, cotacoes_usdt=None,
         "cambio_atual_usdt_brl": str(fx) if fx else None,
         "ativos": linhas,
         "subtotal_avaliavel_usdt": (str(subtotal_usdt)
-                                     if ativos_efetivamente_avaliados else None),
+                                     if ativos_avaliados_usdt else None),
         "subtotal_avaliavel_brl": (str(subtotal_brl)
-                                    if ativos_efetivamente_avaliados else None),
-        "ativos_efetivamente_avaliados": ativos_efetivamente_avaliados,
+                                    if ativos_avaliados_brl else None),
+        "ativos_avaliados_usdt": ativos_avaliados_usdt,
+        "ativos_avaliados_brl": ativos_avaliados_brl,
         "total_documental_nao_certificado_usdt": str(subtotal_usdt) if completo else None,
         "total_documental_nao_certificado_brl": str(subtotal_brl) if completo else None,
         "ativos_sem_valor_integral": sem_avaliacao,
