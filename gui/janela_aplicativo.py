@@ -725,24 +725,24 @@ class JanelaAplicativo(ctk.CTkToplevel):
         )
         caixa.pack(fill="both",expand=True,padx=6,pady=6)
         caixa.insert("end",f"{'ATIVO':<10} {'QUANTIDADE DOCUMENTAL':>23}   "+
-                    f"{'VALOR BRL PARCIAL':>21}   STATUS\\n")
-        caixa.insert("end","-"*105+"\\n")
+                    f"{'VALOR BRL PARCIAL':>21}   STATUS\n")
+        caixa.insert("end","-"*105+"\n")
         for row in painel["ativos"]:
             if row["quantidade_documental"]=="0" and not row["pendencias_custodia"]:
                 continue
             qtd=str(row["quantidade_documental"])
             valor=dinheiro(row["valor_brl"],"R$ ")
-            linha=f"{row['ativo']:<10} {qtd:>23}   {valor:>21}   {row['estado']}\\n"
+            linha=f"{row['ativo']:<10} {qtd:>23}   {valor:>21}   {row['estado']}\n"
             caixa.insert("end",linha)
             if row["pendencias_custodia"]:
                 for aviso in row["pendencias_custodia"]:
-                    caixa.insert("end","  ↳ CONCILIAR: "+aviso+"\\n")
-        caixa.insert("end","\\nFONTE: SHA-256 "+
-                    painel["fonte_sha256"]+"\\n")
+                    caixa.insert("end","  ↳ CONCILIAR: "+aviso+"\n")
+        caixa.insert("end","\nFONTE: SHA-256 "+
+                    painel["fonte_sha256"]+"\n")
         caixa.insert("end","Cotações consultadas UTC: "+
-                    str(painel["instante_cotacoes_utc"])+"\\n")
+                    str(painel["instante_cotacoes_utc"])+"\n")
         caixa.insert("end","DADOS NÃO CERTIFICADOS POR SALDO FINAL DA CORRETORA. "+
-                    "SEM LUCROS ESTIMADOS.\\n")
+                    "SEM LUCROS ESTIMADOS.\n")
         caixa.configure(state="disabled")
 
         def salvar():
@@ -769,7 +769,7 @@ class JanelaAplicativo(ctk.CTkToplevel):
                         out.writerow(linha)
                 messagebox.showinfo("Relatório exportado",
                     "Exportação independente: "+str(destino)+
-                    "\\nNenhum dado da carteira DCA foi substituído.",
+                    "\nNenhum dado da carteira DCA foi substituído.",
                     parent=janela)
             except Exception as exc:
                 messagebox.showerror("Exportação recusada",str(exc),parent=janela)
