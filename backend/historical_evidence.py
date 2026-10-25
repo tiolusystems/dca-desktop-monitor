@@ -207,6 +207,27 @@ def validar_historico_documental(origem: Path) -> dict:
     }
 
 
+def _verificar_manifesto_arquivado(meta: Path, info: dict) -> None:
+    """Reject an altered evidence manifest, including valid-JSON tampering.
+
+    The original import path is not part of the evidence identity: importing
+    identical bytes from a different folder must remain idempotent. All other
+    fields must match a fresh, SHA-verified parse of the archived CSV.
+    """
+    if meta.is_symlink() or not meta.is_file():
+        raise ErroHistoricoDocumental("Manifesto de evidência ausente ou não confiável.")
+    try:
+        if meta.stat().st_size > 1_000_000:
+            raise ErroHistoricoDocumental("Manifesto de evidência excessivamente grande.")
+        declarado = json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        raise ErroHistoricoDocumental("Manifesto de evidência ilegível ou inválido.") from exc
+    if not isinstance(declarado, dict) or set(declarado) != set(info):
+        raise ErroHistoricoDocumental("Manifesto de evidência com estrutura adulterada.")
+    if any(declarado[k] != v for k, v in info.items() if k != "arquivo"):
+        raise ErroHistoricoDocumental("Manifesto não corresponde ao CSV original verificado.")
+
+
 def arquivar_historico_documental(origem: Path, diretorio_dados: Path, sha_esperado: str) -> dict:
     """Arquiva cópia imutável verificável, fora do SQLite operacional.
 
@@ -222,6 +243,12 @@ def arquivar_historico_documental(origem: Path, diretorio_dados: Path, sha_esper
     meta = pasta / f'historico-{info["sha256"]}.json'
     if destino.is_symlink():
         raise ErroHistoricoDocumental("Arquivo de evidência não pode ser um link simbólico.")
+    # Never follow a pre-existing manifest symlink or silently accept a
+    # replaced JSON whose SHA/count/source summaries contradict the CSV.
+    if meta.is_symlink():
+        raise ErroHistoricoDocumental("Manifesto não pode ser um link simbólico.")
+    if meta.exists():
+        _verificar_manifesto_arquivado(meta, info)
     ja_arquivado = destino.exists()
     if ja_arquivado and sha256(destino.read_bytes()).hexdigest() != info["sha256"]:
         raise ErroHistoricoDocumental("Arquivo anterior foi alterado; não sobrescrever.")
@@ -272,4 +299,5 @@ def arquivar_historico_documental(origem: Path, diretorio_dados: Path, sha_esper
             temp_meta.unlink(missing_ok=True)
     if destino.is_symlink() or sha256(destino.read_bytes()).hexdigest() != info["sha256"]:
         raise ErroHistoricoDocumental("Evidência final não passou na verificação.")
+    _verificar_manifesto_arquivado(meta, info)
     return {**info, "copia": str(destino), "ja_arquivado": ja_arquivado}

@@ -1,5 +1,6 @@
 """Historical portfolio activation must keep the original wallet byte-for-byte."""
 import csv
+import json
 from contextlib import closing
 from hashlib import sha256
 from pathlib import Path
@@ -127,6 +128,22 @@ class HistoricalActivationTests(unittest.TestCase):
         with self.assertRaisesRegex(ErroAtivacaoHistorica, "integridade"):
             carregar_historico_ativo(self.dados)
         self.assertEqual(self.wallet.read_bytes(), b"DCA-FINANCIRO-ORIGINAL-INTACTO")
+
+    def test_tampered_manifest_blocks_active_history_without_wallet_mutation(self):
+        result = ativar_historico_documental(
+            self.csv, self.dados,
+            sha_confirmado=sha256(self.csv.read_bytes()).hexdigest(),
+        )
+        digest = result["sha256"]
+        manifest = self.dados / "evidencias" / f"historico-{digest}.json"
+        original = json.loads(manifest.read_text(encoding="utf-8"))
+        original["classes"]["MOVIMENTO_EXTERNO"] = 9999
+        manifest.write_text(json.dumps(original), encoding="utf-8")
+        with self.assertRaisesRegex(ErroAtivacaoHistorica, "verificar"):
+            carregar_historico_ativo(self.dados)
+        self.assertEqual(
+            self.wallet.read_bytes(), b"DCA-FINANCIRO-ORIGINAL-INTACTO"
+        )
 
     def test_history_activation_is_independent_of_existing_wallet_contents(self):
         self.wallet.unlink()
