@@ -1,5 +1,6 @@
 """NC-02: metadata modified during quotes/callback/export must block display."""
 import csv
+from contextlib import closing
 import json
 import sqlite3
 from hashlib import sha256
@@ -73,7 +74,7 @@ class DocumentSnapshotGuardTests(unittest.TestCase):
             revalidar_snapshot_rapido(self.data,self.snapshot)
 
     def test_sqlite_change_during_callback_detected(self):
-        with sqlite3.connect(self.imported["livro"]) as db:
+        with closing(sqlite3.connect(self.imported["livro"])) as db:
             db.execute("UPDATE saldos_documentais SET saldo_algebrico='999'")
             db.commit()
         with self.assertRaises(HistoricoMudouDuranteConsulta):
