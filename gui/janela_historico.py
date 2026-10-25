@@ -110,6 +110,7 @@ class JanelaHistorico(ctk.CTkFrame):
         self.btn_import.configure(state="disabled")
         self.btn_update.configure(state="disabled")
         self.btn_export.configure(state="disabled")
+        self.btn_events.configure(state="disabled")
         self.status.configure(text=texto, text_color=CYAN)
 
     def _liberar(self):
@@ -117,6 +118,7 @@ class JanelaHistorico(ctk.CTkFrame):
         self.btn_import.configure(state="normal")
         self.btn_update.configure(state="normal")
         self.btn_export.configure(state="normal")
+        self.btn_events.configure(state="normal")
 
     def consultar_lancamentos(self):
         """Open independent, paginated, read-only event ledger."""
