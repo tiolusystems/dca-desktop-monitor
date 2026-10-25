@@ -54,6 +54,10 @@ def _historico_ativo_para_pacote(diretorio):
 
 def _restaurar_historico_no_staging(stage, nomes):
     """Rebuild separate documentary SQLite from verified archived source."""
+    # O leitor ativo retorna caminhos resolvidos. No Windows, o diretorio
+    # temporario pode ter representacao diferente da rota canonica; comparar
+    # ambos sem normalizar gera falso erro de restauracao.
+    stage=Path(stage).resolve()
     historicos={nome for nome in nomes if nome.startswith('evidencias/')}
     if not historicos:
         return
