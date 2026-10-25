@@ -151,6 +151,12 @@ class JanelaAplicativo(ctk.CTkToplevel):
             fg_color=BG_INPUT,command=self._preparar_livro_historico,
         )
         self._btn_livro_documental.pack(anchor="w",padx=12,pady=(0,12))
+        self._btn_cruzar_recuperacao=ctk.CTkButton(
+            evidencias,text="Conferir MEU backup DCA contra o histórico",
+            fg_color=BTC_ORANGE,text_color=BG_SURFACE,
+            command=self._auditar_backup_historico,
+        )
+        self._btn_cruzar_recuperacao.pack(anchor="w",padx=12,pady=(0,12))
 
         recovery=self._box(wrap,"Backup e recuperação segura do SQLite")
         self.status_backup=self._texto(
@@ -529,6 +535,75 @@ class JanelaAplicativo(ctk.CTkToplevel):
                         text=texto,text_color=NEON_RED if error else CYAN,
                     )
                     self._btn_livro_documental.configure(state="normal")
+            self._tasks.post(done)
+        self._tasks.run(worker)
+
+    def _auditar_backup_historico(self):
+        """Analisa pacote exportado sem tocar no SQLite atualmente aberto."""
+        pacote=filedialog.askopenfilename(
+            parent=self,title="Escolha DCA-Recuperacao.zip do seu DCA",
+            filetypes=[("Backup DCA","*.zip")],
+        )
+        if not pacote:
+            return
+        historico=filedialog.askopenfilename(
+            parent=self,title="Escolha o CSV histórico documental completo",
+            filetypes=[("Histórico CSV","*.csv")],
+        )
+        if not historico:
+            return
+        self._btn_cruzar_recuperacao.configure(state="disabled")
+        self.status_historico.configure(
+            text="Conferindo hashes, SQLite e ordens documentadas...",
+            text_color=CYAN,
+        )
+        def worker():
+            try:
+                from backend.recovery_crosscheck import auditar_backup_e_historico
+                result=auditar_backup_e_historico(pacote,historico)
+                error=None
+            except Exception as exc:
+                result,error=None,str(exc)
+            def done():
+                if not self.winfo_exists():
+                    return
+                self._btn_cruzar_recuperacao.configure(state="normal")
+                if error:
+                    self.status_historico.configure(
+                        text="Backup/documentação recusados: "+error,text_color=NEON_RED)
+                    return
+                resumo=(
+                    f"Backup verificado. SQLite: {result['operacoes_sqlite']} operações. "
+                    f"Binance: {result['ordens_spot']} ordens Spot. "
+                    f"Correspondências: {result['correspondencias']}. "
+                    f"Faltantes no DCA: {result['ordens_spot_ausentes']}. "
+                    f"Registros sem ordem Spot: {result['sem_spot']}; "
+                    f"compras em outra moeda de cotação: {result['cotadas_nao_usdt']}. "
+                    "Nenhum banco foi alterado."
+                )
+                self.status_historico.configure(text=resumo,text_color=CYAN)
+                if not messagebox.askyesno(
+                    "Salvar relatório de diferenças",
+                    resumo+"\\n\\nExportar CSV de auditoria? "
+                    "O CSV NÃO poderá ser importado como operações DCA.",
+                    parent=self,
+                ):
+                    return
+                destino=filedialog.asksaveasfilename(
+                    parent=self,title="Salvar relatório de divergências",
+                    initialfile="DCA-auditoria-backup-NAO-IMPORTAR.csv",
+                    defaultextension=".csv",filetypes=[("Relatório CSV","*.csv")],
+                    confirmoverwrite=False,
+                )
+                if not destino:
+                    return
+                try:
+                    from backend.recovery_crosscheck import exportar_comparacao
+                    exportar_comparacao(result,Path(destino))
+                    self.status_historico.configure(
+                        text=resumo+" Auditoria salva: "+destino,text_color=CYAN)
+                except Exception as exc:
+                    messagebox.showerror("Relatório não salvo",str(exc),parent=self)
             self._tasks.post(done)
         self._tasks.run(worker)
 
