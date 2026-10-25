@@ -97,6 +97,37 @@ class HistoricalActivationTests(unittest.TestCase):
             carregar_historico_ativo(self.dados)
         self.assertEqual(self.wallet.read_bytes(),b"DCA-FINANCIRO-ORIGINAL-INTACTO")
 
+    def test_sqlite_payload_tampering_with_valid_pragma_is_detected(self):
+        """A valid SQLite structure and unchanged row count are insufficient."""
+        result = ativar_historico_documental(
+            self.csv, self.dados,
+            sha_confirmado=sha256(self.csv.read_bytes()).hexdigest(),
+        )
+        with closing(sqlite3.connect(result["livro"])) as db:
+            db.execute(
+                "UPDATE eventos SET quantidade_assinada='999999' "
+                "WHERE id_evento=(SELECT id_evento FROM eventos LIMIT 1)"
+            )
+            db.commit()
+            self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM eventos").fetchone()[0], 2)
+        with self.assertRaisesRegex(ErroAtivacaoHistorica, "integridade"):
+            carregar_historico_ativo(self.dados)
+        self.assertEqual(self.wallet.read_bytes(), b"DCA-FINANCIRO-ORIGINAL-INTACTO")
+
+    def test_sqlite_custody_tampering_with_valid_pragma_is_detected(self):
+        result = ativar_historico_documental(
+            self.csv, self.dados,
+            sha_confirmado=sha256(self.csv.read_bytes()).hexdigest(),
+        )
+        with closing(sqlite3.connect(result["livro"])) as db:
+            db.execute("UPDATE saldos_documentais SET saldo_algebrico='100000'")
+            db.commit()
+            self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        with self.assertRaisesRegex(ErroAtivacaoHistorica, "integridade"):
+            carregar_historico_ativo(self.dados)
+        self.assertEqual(self.wallet.read_bytes(), b"DCA-FINANCIRO-ORIGINAL-INTACTO")
+
     def test_history_activation_is_independent_of_existing_wallet_contents(self):
         self.wallet.unlink()
         conn=sqlite3.connect(self.wallet)
