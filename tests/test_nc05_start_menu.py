@@ -106,6 +106,7 @@ class AcknowledgedUpdateMenuTest(unittest.TestCase):
                 return proc
             with patch("backend.update_install.raiz_instalacoes",return_value=target_root), \
                  patch("backend.update_install.subprocess.Popen",side_effect=launch), \
+                 patch("backend.update_install.TravaInstancia"), \
                  patch("backend.update_install.sys.platform","win32"), \
                  patch("config.install.install_windows",
                        return_value={"criado":True,"proprio":True}) as desktop, \
