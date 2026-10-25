@@ -117,6 +117,32 @@ def main():
             assert "180.000,00" in hist_tab.summary.cget("text"), hist_tab.summary.cget("text")
             assert "BTC" in hist_tab.table.get("1.0", "end")
             assert "NÃO" in hist_tab.notice.cget("text")
+            # HIST-09: exercise a REAL Windows Tk dialog and read-only SQLite
+            # browse, not merely importable Python modules or mock controls.
+            from hashlib import sha256
+            from backend.historical_activation import ativar_historico_documental
+            ativar_historico_documental(
+                arquivo_hist, hist_tab._data_dir,
+                sha_confirmado=sha256(arquivo_hist.read_bytes()).hexdigest(),
+            )
+            hist_tab.consultar_lancamentos()
+            eventos = hist_tab._janela_eventos
+            assert eventos.winfo_exists(), "Consulta histórica não abriu."
+            import time
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                pump(root)
+                if (not eventos._busy and
+                        "eventos encontrados" in eventos.status.cget("text")):
+                    break
+            assert "2 eventos encontrados" in eventos.status.cget("text"), (
+                eventos.status.cget("text")
+            )
+            assert "BINANCE_TRANSACOES" in eventos.texto.get("1.0", "end")
+            assert "NÃO somar" in eventos.texto.get("1.0", "end")
+            eventos.destroy()
+            pump(root)
+            print("GUI_HIST09_EVENT_BROWSER_REAL=PASS")
             app.tabview.set("📈  Dashboard Geral")
             root.update_idletasks()
             pump(root)
