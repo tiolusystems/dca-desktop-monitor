@@ -342,20 +342,18 @@ class PortfolioDCA:
         )
         _embutir(self.aba_moedas)
 
-        self._historico_ativado = False
-        try:
-            from backend.historical_activation import carregar_historico_ativo
-            self._historico_ativado = (
-                carregar_historico_ativo(self.data_manager._store.diretorio)
-                is not None
-            )
-            if self._historico_ativado:
-                self.tabview.set("📚  Histórico integral")
-            else:
-                self.tabview.set("📈  Dashboard Geral")
-        except Exception as exc:
-            self.tabview.set("📚  Histórico integral")
-            logger.warning("Histórico não ativado por erro de integridade: %s", exc)
+        # Startup must not hash a multi-year CSV or run SQLite integrity
+        # checks on Tk's event thread. Presence only chooses the initial tab;
+        # JanelaHistorico verifies the source asynchronously and fails closed.
+        marcador_historico = (
+            Path(self.data_manager._store.diretorio)
+            / "evidencias" / "historico-ativo.json"
+        )
+        self._historico_ativado = marcador_historico.is_file()
+        self.tabview.set(
+            "📚  Histórico integral" if self._historico_ativado
+            else "📈  Dashboard Geral"
+        )
 
         self.janela.after(0, self._aplicar_cursor_abas)
 
