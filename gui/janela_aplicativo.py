@@ -146,6 +146,11 @@ class JanelaAplicativo(ctk.CTkToplevel):
             command=self._conciliar_saldos_historicos,
         )
         self._btn_conciliar_historico.pack(anchor="w",padx=12,pady=(0,12))
+        self._btn_livro_documental=ctk.CTkButton(
+            evidencias,text="Preparar banco histórico separado (SQLite)",
+            fg_color=BG_INPUT,command=self._preparar_livro_historico,
+        )
+        self._btn_livro_documental.pack(anchor="w",padx=12,pady=(0,12))
 
         recovery=self._box(wrap,"Backup e recuperação segura do SQLite")
         self.status_backup=self._texto(
@@ -479,6 +484,51 @@ class JanelaAplicativo(ctk.CTkToplevel):
                     )
                 except Exception as exc:
                     messagebox.showerror("CSV não exportado",str(exc),parent=self)
+            self._tasks.post(done)
+        self._tasks.run(worker)
+
+    def _preparar_livro_historico(self):
+        """Materializa evento por evento em arquivo distinto do banco financeiro."""
+        origem=filedialog.askopenfilename(
+            parent=self,title="Escolher histórico documental completo",
+            filetypes=[("CSV documental","*.csv")],
+        )
+        if not origem:
+            return
+        if not messagebox.askyesno(
+            "Banco documental separado",
+            "Construir banco SQLite apenas de evidências, dentro de Dados/evidencias? "
+            "O portfolio.sqlite3 e os saldos do painel NÃO serão alterados. "
+            "Operações sem origem comprovada continuarão pendentes.",parent=self,
+        ):
+            return
+        self._btn_livro_documental.configure(state="disabled")
+        self.status_historico.configure(
+            text="Verificando e consolidando histórico em banco independente...",
+            text_color=CYAN,
+        )
+        def worker():
+            try:
+                from backend.historical_store import construir_livro_documental
+                result=construir_livro_documental(
+                    Path(origem),Path(self._db._store.diretorio),
+                )
+                texto=(
+                    f"Banco documental criado e verificado: {result['eventos']} eventos. "
+                    f"Pendências com saldo negativo: {len(result['pendencias'])}. "
+                    f"Arquivo: {result['arquivo']}. "
+                    "A carteira atual NÃO foi modificada."
+                )
+                error=False
+            except Exception as exc:
+                texto="Banco separado não gerado: "+str(exc)
+                error=True
+            def done():
+                if self.winfo_exists():
+                    self.status_historico.configure(
+                        text=texto,text_color=NEON_RED if error else CYAN,
+                    )
+                    self._btn_livro_documental.configure(state="normal")
             self._tasks.post(done)
         self._tasks.run(worker)
 
