@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 from pathlib import Path
+import os
+import tempfile
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -21,6 +23,10 @@ from backend.historical_activation import (
 )
 from backend.historical_evidence import validar_historico_documental
 from backend.historical_live_monitor import calcular_painel_documental
+from backend.historical_snapshot_guard import (
+    abrir_snapshot_documental, revalidar_snapshot_rapido,
+    HistoricoMudouDuranteConsulta,
+)
 from config.tema_cripto import (
     BG_DEEP, BG_CARD, BG_INPUT, BTC_ORANGE, CYAN, NEON_RED,
     TEXT_PRIMARY, TEXT_SECONDARY,
@@ -35,6 +41,7 @@ class JanelaHistorico(ctk.CTkFrame):
         self._tasks = UiDispatcher(self)
         self._data_dir = Path(data_manager._store.diretorio)
         self._painel = None
+        self._snapshot = None
         self._origem = None
         self._busy = False
         self._construir()
@@ -214,9 +221,11 @@ class JanelaHistorico(ctk.CTkFrame):
         def worker():
             origem = None
             report = None
+            snapshot = None
             try:
                 origem = carregar_historico_ativo(self._data_dir)
                 if origem is not None:
+                    snapshot = abrir_snapshot_documental(self._data_dir, origem)
                     from backend.backend import PriceManager
                     from backend.historical_reconciliation import reconciliar_historico_documental
                     from backend.historical_quotes import consultar_cotacoes_historicas
@@ -238,6 +247,11 @@ class JanelaHistorico(ctk.CTkFrame):
                         resultado_conciliado=bruto,
                     )
                     report["ativos_sem_mercado_usdt"] = sem_mercado
+                    # NC-02: recheck after network/calculation, before Tk queue.
+                    after = abrir_snapshot_documental(self._data_dir, origem)
+                    if after["marcas"] != snapshot["marcas"]:
+                        raise HistoricoMudouDuranteConsulta(
+                            "Histórico alterado durante a consulta de cotações.")
                 erro = None
             except Exception as exc:
                 erro = str(exc)
@@ -246,13 +260,22 @@ class JanelaHistorico(ctk.CTkFrame):
                 if not self.winfo_exists():
                     return
                 self._liberar()
-                if erro is not None:
+                erro_final = erro
+                if erro_final is None and origem is not None:
+                    try:
+                        # NC-02: even a mutation while the callback is QUEUED
+                        # must prevent presenting old or untrusted valuations.
+                        revalidar_snapshot_rapido(self._data_dir, snapshot)
+                    except (OSError, ValueError, TypeError) as exc:
+                        erro_final = str(exc)
+                if erro_final is not None:
                     # Never leave the previously rendered valuation looking
                     # valid after the source or the documentary DB fails.
                     self._origem = None
                     self._painel = None
+                    self._snapshot = None
                     self.status.configure(
-                        text="Histórico indisponível: " + erro,
+                        text="Histórico indisponível: " + erro_final,
                         text_color=NEON_RED,
                     )
                     self.summary.configure(
@@ -261,12 +284,13 @@ class JanelaHistorico(ctk.CTkFrame):
                     self._escrever(
                         "Arquivo documental ou cotações não validados. "
                         "O banco operacional permanece preservado.\\n"
-                        + erro
+                        + erro_final
                     )
                     return
                 if origem is None:
                     self._origem = None
                     self._painel = None
+                    self._snapshot = None
                     self.status.configure(
                         text="Histórico ainda não ativado. "
                              "Use Importar e ativar histórico completo (CSV).",
@@ -281,6 +305,7 @@ class JanelaHistorico(ctk.CTkFrame):
                     )
                     return
                 self._origem, self._painel = origem, report
+                self._snapshot = snapshot
                 self._exibir(report)
             self._tasks.post(done)
         self._tasks.run(worker)
@@ -344,7 +369,18 @@ class JanelaHistorico(ctk.CTkFrame):
         self._escrever("\n".join(lines))
 
     def exportar(self):
-        if self._busy or self._painel is None:
+        if self._busy or self._painel is None or self._snapshot is None:
+            return
+        try:
+            revalidar_snapshot_rapido(self._data_dir, self._snapshot)
+        except (OSError, ValueError, TypeError) as exc:
+            self._painel = None
+            self._origem = None
+            self._snapshot = None
+            self.summary.configure(text="Exportação bloqueada: origem perdeu integridade.")
+            self._escrever("Dados documentais modificados; atualize e confira novamente.")
+            messagebox.showerror("Integridade documental", str(exc),
+                                 parent=self.winfo_toplevel())
             return
         destino = filedialog.asksaveasfilename(
             parent=self.winfo_toplevel(),title="Exportar relatório (NÃO importar no DCA)",
@@ -355,24 +391,50 @@ class JanelaHistorico(ctk.CTkFrame):
         )
         if not destino:
             return
-        fields = ["ativo", "quantidade_documental", "custodias", "valor_usdt",
+        fields = ["fonte_sha256", "versao_aplicativo", "instante_cotacoes_utc",
+                  "cambio_usdt_brl_atual", "tipo_relatorio",
+                  "ativo", "quantidade_documental", "custodias", "valor_usdt",
                   "valor_brl", "estado", "pendencias_custodia", "lacuna_temporal",
                   "custo_historico_brl", "lucro_prejuizo_brl",
                   "compras_brutas_brl_binance", "vendas_brutas_brl_binance",
                   "compras_brutas_brl_mp_transcricao", "vendas_brutas_brl_mp_transcricao"]
+        temporario = None
         try:
-            with Path(destino).open("x", encoding="utf-8-sig", newline="") as fp:
+            from backend.app_lifecycle import APP_VERSION
+            revalidar_snapshot_rapido(self._data_dir, self._snapshot)
+            destino = Path(destino).expanduser().resolve()
+            if destino.exists():
+                raise FileExistsError("Relatório existente: não sobrescrever.")
+            with tempfile.NamedTemporaryFile(
+                    mode="w", dir=destino.parent, prefix=".dca-export-",
+                    suffix=".csv", encoding="utf-8-sig", newline="",
+                    delete=False) as fp:
+                temporario = Path(fp.name)
                 writer = csv.DictWriter(fp, fieldnames=fields)
                 writer.writeheader()
                 for item in self._painel["ativos"]:
-                    entry = {key: item[key] for key in fields}
+                    entry = {key:item.get(key) for key in fields}
+                    entry.update(
+                        fonte_sha256=self._painel["fonte_sha256"],
+                        versao_aplicativo=APP_VERSION,
+                        instante_cotacoes_utc=self._painel.get("instante_cotacoes_utc") or "",
+                        cambio_usdt_brl_atual=self._painel.get("cambio_atual_usdt_brl") or "",
+                        tipo_relatorio="SNAPSHOT_DOCUMENTAL_NAO_CERTIFICADO_NAO_IMPORTAR",
+                    )
                     for key in ("custodias", "pendencias_custodia"):
                         entry[key] = json.dumps(entry[key], ensure_ascii=False)
                     writer.writerow(entry)
+                fp.flush()
+                os.fsync(fp.fileno())
+            revalidar_snapshot_rapido(self._data_dir, self._snapshot)
+            os.link(temporario, destino)  # Exclusive: never replace an existing export.
         except Exception as exc:
             messagebox.showerror("Arquivo não exportado", str(exc),
                                  parent=self.winfo_toplevel())
             return
+        finally:
+            if temporario is not None:
+                temporario.unlink(missing_ok=True)
         messagebox.showinfo("Exportação concluída",
                             "Relatório de conferência criado. "
                             "O banco financeiro não foi modificado.",
