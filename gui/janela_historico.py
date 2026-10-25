@@ -209,14 +209,18 @@ class JanelaHistorico(ctk.CTkFrame):
                     if row["ativo"] not in ("BRL", "USDT")
                     and Decimal(row["saldo_algebrico"]) != 0
                 })
+                from backend.historical_quotes import consultar_cotacoes_historicas
                 prices = PriceManager()
-                prices.atualizar_precos(symbols)
+                cotacoes, cambio, sem_mercado = consultar_cotacoes_historicas(
+                    prices, symbols,
+                )
                 report = calcular_painel_documental(
                     origem,
-                    cotacoes_usdt=prices.precos_para_avaliacao(),
-                    cambio_usdt_brl=prices.taxa_brl_para_avaliacao(),
+                    cotacoes_usdt=cotacoes,
+                    cambio_usdt_brl=cambio,
                     instante_cotacoes=datetime.now(timezone.utc).isoformat(),
                 )
+                report["ativos_sem_mercado_usdt"] = sem_mercado
                 erro = None
             except Exception as exc:
                 report, erro = None, str(exc)
@@ -249,8 +253,9 @@ class JanelaHistorico(ctk.CTkFrame):
             text=(f"{report['eventos_documentais']} eventos de origem · "
                   f"{report['quantidade_ativos']} ativos · "
                   f"{report['posicoes_custodia']} posições por custodiante · "
-                  f"{gaps} ativos com lacunas. Cotações: "
-                  f"{report['instante_cotacoes_utc']}"),
+                  f"{gaps} ativos com lacunas. "
+                  f"{len(report.get('ativos_sem_mercado_usdt', []))} ativos sem mercado USDT. "
+                  f"Cotações: {report['instante_cotacoes_utc']}"),
             text_color=CYAN if not gaps else NEON_RED,
         )
         self.summary.configure(
