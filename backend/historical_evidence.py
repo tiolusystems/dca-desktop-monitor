@@ -109,6 +109,50 @@ def _validar_evento(linha: dict, numero: int) -> None:
             raise ErroHistoricoDocumental(f"Linha {numero}: transferência reclassificada.")
     if linha["fonte"] == "PTAX_REFERENCIA" and linha["taxa_brl_efetiva"]:
         raise ErroHistoricoDocumental(f"Linha {numero}: PTAX não é câmbio executado.")
+    # HIST-07: a classificação não pode contradizer a fonte que o
+    # reconciliador realmente contabiliza. Antes, um evento MP marcado
+    # "NENHUM" ainda entrava no saldo, e um SPOT com classe arbitrária
+    # podia ser contado como comprovante de compra BRL.
+    fonte = linha["fonte"]
+    classe = linha["classe_evidencia"]
+    impacto = linha["impacto_saldo"]
+    if fonte == "BINANCE_SPOT":
+        if classe != "EXECUCAO_SPOT" or impacto != "NAO_SOMAR_DUPLICA_LANCAMENTO_BINANCE":
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: fonte Spot incompatível com classe/impacto.")
+        if linha["lado"].upper() not in ("BUY", "SELL"):
+            raise ErroHistoricoDocumental(f"Linha {numero}: lado Spot inválido.")
+    elif fonte == "MERCADO_PAGO_TRANSCRITO":
+        if impacto != "SOMENTE_CUSTODIA_MERCADO_PAGO_NAO_ADICIONAR_A_BINANCE":
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: fonte Mercado Pago incompatível com impacto.")
+        bruto = linha["quantidade_assinada"]
+        if not bruto:
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: quantidade Mercado Pago ausente.")
+        qtd = Decimal(bruto)
+        if classe == "TRANSFERENCIA_BTC_EXTERNA_TRANSCRITA" and qtd >= 0:
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: transferência enviada deve reduzir a custódia.")
+        if classe == "COMPRA_BTC_BRL_TRANSCRITA" and qtd <= 0:
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: compra MP deve aumentar a custódia.")
+        if classe == "VENDA_BTC_BRL_TRANSCRITA" and qtd >= 0:
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: venda MP deve reduzir a custódia.")
+    elif fonte != "BINANCE_TRANSACOES" and impacto in (
+        "SIM_APENAS_SALDO_CONTA_DOCUMENTADA",
+        "SOMENTE_CUSTODIA_MERCADO_PAGO_NAO_ADICIONAR_A_BINANCE",
+    ):
+        raise ErroHistoricoDocumental(
+            f"Linha {numero}: fonte documental sem autorização de impacto no saldo.")
+    if fonte == "CAMBIO_REAL_BINANCE" and (
+        not linha["taxa_brl_efetiva"]
+        or Decimal(linha["taxa_brl_efetiva"]) <= 0
+    ):
+        raise ErroHistoricoDocumental(
+            f"Linha {numero}: câmbio executado ausente ou não positivo.")
+
 
 
 def validar_historico_documental(origem: Path) -> dict:

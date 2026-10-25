@@ -81,6 +81,29 @@ class PainelDocumentalTest(TestCase):
         self.assertIsNone(r["ativos"][0]["valor_brl"])
         self.assertEqual(r["ativos"][0]["estado"], "LACUNA_DE_CUSTODIA")
 
+    def test_temporary_negative_reports_first_date_and_minimum_without_fake_balance(self):
+        source = saldo("AXS", "12.5", "BINANCE:EARN",
+                       "HISTORICO_COM_LACUNA_TEMPORAL")
+        source["data_primeiro_saldo_negativo"] = "2023-07-18 14:30:00"
+        source["menor_saldo_no_periodo"] = "-1.75"
+        r = self.calculate(resumo(source), {"AXS": "1.25"}, "5.10")
+        asset = r["ativos"][0]
+        self.assertEqual(asset["quantidade_documental"], "12.5")
+        self.assertEqual(asset["estado"], "LACUNA_DE_CUSTODIA")
+        self.assertIsNone(asset["valor_brl"])
+        self.assertTrue(any("2023-07-18 14:30:00" in issue and
+                            "-1.75" in issue for issue in asset["pendencias_custodia"]))
+        self.assertIsNone(r["total_documental_nao_certificado_brl"])
+
+    def test_final_negative_shows_custody_and_exact_amount(self):
+        r = self.calculate(resumo(
+            saldo("UNI", "-3.25", "BINANCE:EARN",
+                  "ORIGEM_INCOMPLETA_SALDO_NEGATIVO")
+        ), {"UNI": "5"}, "5")
+        self.assertIn("BINANCE:EARN: saldo final negativo -3.25 UNI",
+                      r["ativos"][0]["pendencias_custodia"])
+        self.assertIsNone(r["ativos"][0]["valor_brl"])
+
     def test_cotacoes_invalidas_sao_indisponiveis(self):
         r = self.calculate(resumo(saldo("DOGE", "100")),
                            {"DOGE": float("nan")}, -1)

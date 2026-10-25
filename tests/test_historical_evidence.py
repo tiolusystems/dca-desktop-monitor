@@ -128,5 +128,73 @@ class HistoricoDocumentalTest(unittest.TestCase):
             validar_historico_documental(self.csv)
 
 
+    def test_spot_source_cannot_disguise_a_br_lot_as_another_class(self):
+        _write(self.csv, [_row(
+            classe_evidencia="MOVIMENTO_EXTERNO",
+            impacto_saldo="NAO_SOMAR_DUPLICA_LANCAMENTO_BINANCE",
+            moeda_cotacao="BRL", valor_cotacao_executado="1000",
+        )])
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "fonte Spot incompatível"):
+            validar_historico_documental(self.csv)
+
+    def test_spot_source_rejects_invalid_side_even_when_amount_present(self):
+        _write(self.csv, [_row(lado="DEPOSIT")])
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "lado Spot inválido"):
+            validar_historico_documental(self.csv)
+
+    def test_mp_impact_cannot_be_declared_no_effect_then_counted(self):
+        _write(self.csv, [_row(
+            fonte="MERCADO_PAGO_TRANSCRITO",
+            classe_evidencia="COMPRA_BTC_BRL_TRANSCRITA",
+            impacto_saldo="NENHUM", quantidade_assinada="0.01",
+            valor_brl_documentado="2000",
+        )])
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "Mercado Pago incompatível"):
+            validar_historico_documental(self.csv)
+
+    def test_mp_outbound_transfer_must_not_increase_custody(self):
+        _write(self.csv, [_row(
+            fonte="MERCADO_PAGO_TRANSCRITO",
+            classe_evidencia="TRANSFERENCIA_BTC_EXTERNA_TRANSCRITA",
+            impacto_saldo="SOMENTE_CUSTODIA_MERCADO_PAGO_NAO_ADICIONAR_A_BINANCE",
+            operacao_origem="transferência enviada", quantidade_assinada="0.02",
+        )])
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "deve reduzir a custódia"):
+            validar_historico_documental(self.csv)
+
+    def test_mp_buy_and_sell_signs_cannot_be_reversed(self):
+        for classe, quantidade, mensagem in [
+            ("COMPRA_BTC_BRL_TRANSCRITA", "-0.1", "compra MP"),
+            ("VENDA_BTC_BRL_TRANSCRITA", "0.1", "venda MP"),
+        ]:
+            with self.subTest(classe=classe):
+                _write(self.csv, [_row(
+                    fonte="MERCADO_PAGO_TRANSCRITO",
+                    classe_evidencia=classe,
+                    impacto_saldo="SOMENTE_CUSTODIA_MERCADO_PAGO_NAO_ADICIONAR_A_BINANCE",
+                    quantidade_assinada=quantidade, valor_brl_documentado="1000",
+                )])
+                with self.assertRaisesRegex(ErroHistoricoDocumental, mensagem):
+                    validar_historico_documental(self.csv)
+
+    def test_legacy_cannot_claim_binance_balance_impact(self):
+        _write(self.csv, [_row(
+            fonte="DIARIO_LEGADO", classe_evidencia="REGISTRO_LEGADO",
+            impacto_saldo="SIM_APENAS_SALDO_CONTA_DOCUMENTADA",
+        )])
+        with self.assertRaisesRegex(ErroHistoricoDocumental, "sem autorização"):
+            validar_historico_documental(self.csv)
+
+    def test_executed_fx_cannot_be_missing_zero_or_negative(self):
+        for rate in ("", "0", "-5"):
+            with self.subTest(rate=rate):
+                _write(self.csv, [_row(
+                    fonte="CAMBIO_REAL_BINANCE", classe_evidencia="CAMBIO_EXECUTADO",
+                    impacto_saldo="NENHUM", taxa_brl_efetiva=rate,
+                )])
+                with self.assertRaisesRegex(ErroHistoricoDocumental, "câmbio executado"):
+                    validar_historico_documental(self.csv)
+
+
 if __name__ == "__main__":
     unittest.main()
