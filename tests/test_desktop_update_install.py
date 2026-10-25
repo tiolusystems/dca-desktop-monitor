@@ -124,7 +124,8 @@ class DesktopUpdateTests(unittest.TestCase):
             return child
         with patch('backend.update_install.raiz_instalacoes',return_value=self.base), \
              patch('backend.update_install.subprocess.Popen',side_effect=launch), \
-             patch('config.install.install_windows',return_value={'criado':True,'proprio':True}) as shortcut:
+             patch('config.install.install_windows',return_value={'criado':True,'proprio':True}) as shortcut, \
+             patch('config.install.install_menu_iniciar_windows',return_value={'ignorado':True}) as menu:
             record=executar_instalacao(action)
         self.assertEqual(record['state'],'installed');shortcut.assert_called_once()
         self.assertEqual(self.dm.arquivo_db.read_bytes(),self.db_before)
