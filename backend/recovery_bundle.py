@@ -5,6 +5,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import zipfile
@@ -13,7 +14,69 @@ from backend.database_identity import validar_banco_dca
 
 CONFIGS=('app-settings.json','user-config.json')
 ALLOWED={'portfolio.sqlite3','original.csv',*CONFIGS}
-def digest(data):return hashlib.sha256(data).hexdigest()
+HIST_POINTER='evidencias/historico-ativo.json'
+HIST_SHA=re.compile(r'^[0-9a-f]{64}$')
+HIST_FILE=re.compile(r'^evidencias/historico-[0-9a-f]{64}\.(csv|json)$')
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _historico_ativo_para_pacote(diretorio):
+    """Backup active immutable evidence; the derived SQLite is rebuilt on restore.
+
+    Never silently omit an active history if its verification fails.
+    """
+    from backend.historical_activation import carregar_historico_ativo
+    folder=Path(diretorio).resolve()
+    fonte=carregar_historico_ativo(folder)
+    if fonte is None:
+        return {}
+    chave=fonte.stem.removeprefix('historico-')
+    if not HIST_SHA.fullmatch(chave):
+        raise RuntimeError('Identificador de histórico inválido.')
+    nomes=(HIST_POINTER, f'evidencias/historico-{chave}.csv',
+           f'evidencias/historico-{chave}.json')
+    dados={}
+    for nome in nomes:
+        arquivo=folder/nome
+        if arquivo.is_symlink() or not arquivo.is_file():
+            raise RuntimeError('Evidência histórica ativa não é arquivo regular.')
+        dados[nome]=arquivo.read_bytes()
+    if digest(dados[nomes[1]])!=chave:
+        raise RuntimeError('Histórico ativo mudou durante o backup.')
+    if carregar_historico_ativo(folder)!=fonte or any(
+            (folder/nome).read_bytes()!=dados[nome] for nome in nomes):
+        raise RuntimeError('Evidência histórica mudou durante o backup.')
+    return dados
+
+
+def _restaurar_historico_no_staging(stage, nomes):
+    """Rebuild separate documentary SQLite from verified archived source."""
+    historicos={nome for nome in nomes if nome.startswith('evidencias/')}
+    if not historicos:
+        return
+    if HIST_POINTER not in historicos:
+        raise RuntimeError('Pacote histórico sem marcador de ativação.')
+    try:
+        marcador=json.loads((stage/HIST_POINTER).read_text(encoding='utf-8'))
+        chave=marcador['sha256']
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError('Marcador histórico de recuperação inválido.') from exc
+    if not isinstance(chave,str) or not HIST_SHA.fullmatch(chave):
+        raise RuntimeError('SHA do histórico de recuperação inválido.')
+    esperados={HIST_POINTER, f'evidencias/historico-{chave}.csv',
+               f'evidencias/historico-{chave}.json'}
+    if historicos!=esperados:
+        raise RuntimeError('Pacote histórico incompleto ou com fonte inesperada.')
+    from backend.historical_store import construir_livro_documental
+    from backend.historical_activation import carregar_historico_ativo
+    fonte=stage/f'evidencias/historico-{chave}.csv'
+    construir_livro_documental(fonte,stage)
+    if carregar_historico_ativo(stage)!=fonte:
+        raise RuntimeError('Histórico recuperado não passou na validação.')
+
 
 def exportar_pacote(banco,destino):
     db=Path(banco).resolve();out=Path(destino).resolve()
@@ -34,6 +97,7 @@ def exportar_pacote(banco,destino):
             file=db.parent/name
             if file.is_file():
                 content=file.read_bytes();json.loads(content);data[name]=content
+        data.update(_historico_ativo_para_pacote(db.parent))
         manifest={'formato':'DCA-RECOVERY-1',**identity,
                   'gerado_em_utc':datetime.now(timezone.utc).isoformat(),
                   'arquivos':{n:digest(b) for n,b in data.items()}}
@@ -53,8 +117,13 @@ def recuperar_pacote(pacote,destino):
         stage=Path(tmp)
         with zipfile.ZipFile(pacote) as archive:
             names=archive.namelist()
-            if (len(names)!=len(set(names)) or set(names)-ALLOWED-{'manifest.json'}
-                or 'manifest.json' not in names or any(i.file_size>512*1024*1024 for i in archive.infolist())):
+            if (len(names)!=len(set(names))
+                or any(name not in ALLOWED and name!='manifest.json'
+                       and name!=HIST_POINTER and not HIST_FILE.fullmatch(name)
+                       for name in names)
+                or 'manifest.json' not in names
+                or any(i.file_size>512*1024*1024 for i in archive.infolist())
+                or sum(i.file_size for i in archive.infolist())>700*1024*1024):
                 raise RuntimeError('Estrutura do pacote inválida.')
             manifest=json.loads(archive.read('manifest.json'))
             if manifest.get('formato')!='DCA-RECOVERY-1' or set(names)!=(set(manifest['arquivos'])|{'manifest.json'}):
@@ -62,7 +131,10 @@ def recuperar_pacote(pacote,destino):
             for name,sha in manifest['arquivos'].items():
                 content=archive.read(name)
                 if digest(content)!=sha:raise RuntimeError('Hash divergente: '+name)
-                (stage/name).write_bytes(content)
+                arquivo=stage/name
+                arquivo.parent.mkdir(parents=True,exist_ok=True)
+                arquivo.write_bytes(content)
+        _restaurar_historico_no_staging(stage,set(manifest['arquivos']))
         db=stage/'portfolio.sqlite3';identity=validar_banco_dca(db,carteira_esperada=manifest['uuid'],permitir_antigo=True)
         from backend.storage_sqlite import SCHEMA_VERSION, ArmazemSQLite
         if identity['schema'] < SCHEMA_VERSION:
@@ -85,9 +157,12 @@ def recuperar_pacote(pacote,destino):
             'nota':'Somente caminhos de proveniência remapeados; registros financeiros preservados.'},ensure_ascii=False),encoding='utf-8')
         target.mkdir()  # exclusive; never merge into an existing installation
         (target/"RECOVERY-INCOMPLETE").write_text("Recuperação ainda não concluída",encoding="utf-8")
-        for file in stage.iterdir():
+        for file in stage.rglob('*'):
             if not file.is_file():continue
-            with file.open('rb') as source,(target/file.name).open('xb') as output:
+            relativo=file.relative_to(stage)
+            destino_arquivo=target/relativo
+            destino_arquivo.parent.mkdir(parents=True,exist_ok=True)
+            with file.open('rb') as source,destino_arquivo.open('xb') as output:
                 for chunk in iter(lambda:source.read(1024*1024),b''):output.write(chunk)
                 output.flush();os.fsync(output.fileno())
         (target/"RECOVERY-INCOMPLETE").unlink()
