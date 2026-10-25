@@ -122,6 +122,27 @@ def _validar_evento(linha: dict, numero: int) -> None:
                 f"Linha {numero}: fonte Spot incompatível com classe/impacto.")
         if linha["lado"].upper() not in ("BUY", "SELL"):
             raise ErroHistoricoDocumental(f"Linha {numero}: lado Spot inválido.")
+        # NC-04: validar economia da execução, não apenas estrutura/sha.
+        # Fonte Binance Spot informa base, par, preço, quantidade e total
+        # executado; arredondamento decimal máximo 1e-8 da moeda de cotação
+        # ou 1 parte por milhão do próprio total informado.
+        for campo in ("preco_executado", "quantidade_executada", "valor_cotacao_executado"):
+            if not linha[campo] or Decimal(linha[campo]) <= 0:
+                raise ErroHistoricoDocumental(
+                    f"Linha {numero}: execução Spot exige {campo} positivo.")
+        base = linha["ativo"].strip().upper()
+        quote = linha["moeda_cotacao"].strip().upper()
+        pair = linha["par"].strip().upper()
+        if not base or not quote or not pair or pair != base + quote:
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: ativo/par/cotação Spot incompatíveis.")
+        estimado = Decimal(linha["preco_executado"]) * Decimal(linha["quantidade_executada"])
+        bruto = Decimal(linha["valor_cotacao_executado"])
+        tolerancia = max(Decimal("0.00000001"), bruto * Decimal("0.000001"))
+        if abs(estimado - bruto) > tolerancia:
+            raise ErroHistoricoDocumental(
+                f"Linha {numero}: preço × quantidade diverge do valor Spot executado.")
+
     elif fonte == "MERCADO_PAGO_TRANSCRITO":
         if impacto != "SOMENTE_CUSTODIA_MERCADO_PAGO_NAO_ADICIONAR_A_BINANCE":
             raise ErroHistoricoDocumental(
