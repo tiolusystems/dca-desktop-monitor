@@ -277,6 +277,9 @@ class JanelaHistorico(ctk.CTkFrame):
                 f"{row['ativo']:<9} {qty:>27} "
                 f"{self._valor(row['valor_brl'],'R$ '):>19}  {row['estado']}"
             )
+            for custodia, saldo in sorted(row["custodias"].items()):
+                if Decimal(saldo) != 0:
+                    lines.append(f"    ↳ {custodia}: {saldo} {row['ativo']}")
             if row["pendencias_custodia"]:
                 lines.extend("    ↳ A CONCILIAR: " + note for note in row["pendencias_custodia"])
             brl_binance = Decimal(row["compras_brutas_brl_binance"])
