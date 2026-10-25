@@ -345,6 +345,8 @@ class PortfolioDCA:
             from backend.historical_activation import carregar_historico_ativo
             if carregar_historico_ativo(self.data_manager._store.diretorio) is not None:
                 self.tabview.set("📚  Histórico integral")
+            else:
+                self.tabview.set("📈  Dashboard Geral")
         except Exception as exc:
             logger.warning("Histórico não ativado por erro de integridade: %s", exc)
 
