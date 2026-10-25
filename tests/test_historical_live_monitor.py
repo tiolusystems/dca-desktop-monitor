@@ -1,5 +1,6 @@
 """Tests for conservative, read-only documentary portfolio valuation."""
 from pathlib import Path
+from hashlib import sha256
 from collections import defaultdict
 import csv
 import tempfile
@@ -73,6 +74,73 @@ class PainelDocumentalTest(TestCase):
         self.assertEqual(r["total_documental_nao_certificado_usdt"], "9510.0")
         self.assertFalse(r["posicao_certificada_pela_corretora"])
         self.assertFalse(r["financeiro_operacional_alterado"])
+
+    def test_reconciled_source_is_reused_without_duplicate_full_csv_parse(self):
+        """No second 13k-row reconciliation during the same refresh."""
+        with tempfile.TemporaryDirectory() as root:
+            arquivo = Path(root) / "historico.csv"
+            arquivo.write_bytes(b"documento-integro")
+            previa = resumo(saldo("BTC", "0.25"))
+            previa["sha256"] = sha256(arquivo.read_bytes()).hexdigest()
+            fluxos = defaultdict(lambda: {
+                "binance_compra": 0, "binance_venda": 0,
+                "mp_compra_transcrita": 0, "mp_venda_transcrita": 0,
+            })
+            with patch(
+                "backend.historical_live_monitor.reconciliar_historico_documental",
+                side_effect=AssertionError("Reconciliação duplicada"),
+            ), patch(
+                "backend.historical_live_monitor._fluxos_brl_documentados",
+                return_value=fluxos,
+            ) as leitura:
+                painel = calcular_painel_documental(
+                    arquivo, resultado_conciliado=previa,
+                    cotacoes_usdt={"BTC": "100000"},
+                    cambio_usdt_brl="5",
+                )
+            self.assertEqual(leitura.call_count, 1)
+            self.assertEqual(painel["ativos"][0]["quantidade_documental"], "0.25")
+            self.assertEqual(painel["subtotal_avaliavel_brl"], "125000.00")
+            self.assertIsNone(painel["custo_brl_consolidado"])
+
+    def test_reconciled_source_changed_before_refresh_fails_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            arquivo = Path(root) / "historico.csv"
+            arquivo.write_bytes(b"original")
+            previa = resumo(saldo("BTC", "1"))
+            previa["sha256"] = sha256(arquivo.read_bytes()).hexdigest()
+            arquivo.write_bytes(b"alterado")
+            with patch(
+                "backend.historical_live_monitor.reconciliar_historico_documental",
+                side_effect=AssertionError("Reconciliação duplicada"),
+            ):
+                with self.assertRaisesRegex(ValueError, "não corresponde"):
+                    calcular_painel_documental(
+                        arquivo, resultado_conciliado=previa,
+                        cotacoes_usdt={"BTC": "100"},
+                    )
+
+    def test_reconciled_source_changed_during_brl_read_fails_closed(self):
+        with tempfile.TemporaryDirectory() as root:
+            arquivo = Path(root) / "historico.csv"
+            arquivo.write_bytes(b"original")
+            previa = resumo(saldo("BTC", "1"))
+            previa["sha256"] = sha256(arquivo.read_bytes()).hexdigest()
+            def adulterar(_):
+                arquivo.write_bytes(b"alterado durante a leitura")
+                return defaultdict(lambda: {
+                    "binance_compra": 0, "binance_venda": 0,
+                    "mp_compra_transcrita": 0, "mp_venda_transcrita": 0,
+                })
+            with patch(
+                "backend.historical_live_monitor._fluxos_brl_documentados",
+                side_effect=adulterar,
+            ):
+                with self.assertRaisesRegex(ValueError, "alterado durante"):
+                    calcular_painel_documental(
+                        arquivo, resultado_conciliado=previa,
+                        cotacoes_usdt={"BTC": "100"},
+                    )
 
     def test_historical_negative_even_if_final_positive_is_blocked(self):
         r = self.calculate(resumo(
