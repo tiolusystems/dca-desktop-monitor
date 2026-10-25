@@ -173,7 +173,7 @@ def executar_instalacao(action, *, timeout=90):
     """Runs as a separate frozen process after the old GUI exits gracefully."""
     from backend.recovery_bundle import exportar_pacote, recuperar_pacote
     from backend.windows_lifecycle import verificar_separacao_dados
-    from config.install import install_windows
+    from config.install import install_windows, install_menu_iniciar_windows
     action = sem_vinculos(action)
     record = json.loads(action.read_text('utf-8'))
     token = record.get('token', '')
@@ -238,7 +238,18 @@ def executar_instalacao(action, *, timeout=90):
                 result = install_windows(executavel=target / 'DCA-Monitor.exe', anterior=source)
                 if not result['criado'] and not result.get('proprio'):
                     raise RuntimeError(result['status'])
-                record.update(state='installed', shortcut=result, pid=child.pid)
+                # NC-05: the update must refresh the existing OWNED Start
+                # Menu shortcut as well as Desktop, but never create one when
+                # the user did not previously request that shortcut.
+                if sys.platform == 'win32':
+                    menu = install_menu_iniciar_windows(
+                        executavel=target / 'DCA-Monitor.exe',
+                        anterior=source, somente_se_existente=True,
+                    )
+                else:
+                    menu = {'ignorado': True, 'status': 'Menu Iniciar só existe no Windows.'}
+                record.update(state='installed', shortcut=result,
+                              menu_iniciar=menu, pid=child.pid)
                 _salvar(action, record)
                 return record
             if child.poll() is not None:
