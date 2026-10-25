@@ -18,7 +18,7 @@ from backend.windows_lifecycle import comparar_versoes
 RELEASE_ENDPOINT = (
     "https://api.github.com/repos/tiolusystems/dca-desktop-monitor/releases/latest"
 )
-APP_VERSION = "1.0.2"  # batch quote refresh and stricter new-entry evidence
+APP_VERSION = "1.0.3"  # documentary positions monitor; no migration of historical P/L
 DEFAULTS = {"minimizar_para_bandeja": False}
 VERSION_PATTERN = re.compile(r"^v?([0-9]+\.[0-9]+\.[0-9]+)$")
 
