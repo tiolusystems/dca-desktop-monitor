@@ -132,6 +132,40 @@ class ReconciliaHistoricoTest(unittest.TestCase):
         self.assertEqual(r["negativos_em_alguma_data"],[])
         self.assertEqual(self.pos(r,"BINANCE:Spot","BTC")["saldo_algebrico"],"0.09999")
 
+    def test_brutos_do_mesmo_segundo_nao_sao_apagados_por_compensacao(self):
+        # Antes: entrada 4 e saída 5 no mesmo segundo viravam somente
+        # saída líquida 1. Saldo certo, volume bruto histórico errado.
+        r = self.apply([
+            tx(2, "2026-01-01 10:00:00", "Deposit", "BTC", "10"),
+            tx(3, "2026-01-01 10:01:00", "Transaction Spend", "BTC", "-5"),
+            tx(4, "2026-01-01 10:01:00", "Transaction Buy", "BTC", "4"),
+        ])
+        p = self.pos(r, "BINANCE:Spot", "BTC")
+        self.assertEqual(p["saldo_algebrico"], "9")
+        self.assertEqual(p["entradas_documentadas"], "14")
+        self.assertEqual(p["saidas_documentadas"], "5")
+        self.assertEqual(r["negativos_em_alguma_data"], [])
+
+    def test_earn_reversoes_mesmo_segundo_preservam_fluxo_por_custodia(self):
+        r = self.apply([
+            tx(2, "2026-01-01 10:00:00", "Deposit", "ETH", "10"),
+            tx(3, "2026-01-01 10:01:00",
+               "Simple Earn Flexible Subscription", "ETH", "-4",
+               classe="MOVIMENTO_INTERNO_EARN"),
+            tx(4, "2026-01-01 10:01:00",
+               "Simple Earn Flexible Redemption", "ETH", "3",
+               classe="MOVIMENTO_INTERNO_EARN"),
+        ])
+        spot = self.pos(r, "BINANCE:Spot", "ETH")
+        earn = self.pos(r, "BINANCE:EARN", "ETH")
+        self.assertEqual((spot["entradas_documentadas"],
+                          spot["saidas_documentadas"],
+                          spot["saldo_algebrico"]), ("13", "4", "9"))
+        self.assertEqual((earn["entradas_documentadas"],
+                          earn["saidas_documentadas"],
+                          earn["saldo_algebrico"]), ("4", "3", "1"))
+        self.assertEqual(r["negativos_em_alguma_data"], [])
+
     def test_saldo_negativo_nao_e_consertado_com_entrada_automatica(self):
         r=self.apply([tx(2,"2026-01-01 12:00:00","Withdraw","BTC","-0.01",
                          classe="MOVIMENTO_EXTERNO")])
