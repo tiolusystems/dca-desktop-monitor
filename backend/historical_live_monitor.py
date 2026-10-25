@@ -7,6 +7,7 @@ Cotações atuais podem valorizar saldo documental, jamais substituir custo real
 from __future__ import annotations
 
 from collections import defaultdict
+from hashlib import sha256
 import csv
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -62,17 +63,34 @@ def _fluxos_brl_documentados(arquivo_csv):
 
 
 def calcular_painel_documental(arquivo_csv: Path, *, cotacoes_usdt=None,
-                                cambio_usdt_brl=None, instante_cotacoes=None):
+                                cambio_usdt_brl=None, instante_cotacoes=None,
+                                resultado_conciliado=None):
     """Apura quantidades por ativo, custo desconhecido e valorização parcial.
 
     Nunca compensa silenciosamente saldos negativos de uma custódia com saldo
     positivo de outra. Mesmo preços válidos não certificam a carteira real.
     USDC não tem paridade presumida com USDT; PTAX não é USDT/BRL executado.
     """
-    resultado = reconciliar_historico_documental(Path(arquivo_csv))
+    # A aba já reconcilia o arquivo uma vez para descobrir quais ativos têm
+    # posição. Reconciliar os 13.218 eventos novamente em cada refresh é caro.
+    # Aceitar a prévia somente se ainda corresponder ao MESMO CSV byte a byte.
+    # A conferência antes e depois da leitura dos fluxos fecha a janela de
+    # alteração da fonte entre o resumo e os comprovantes BRL.
+    fonte = Path(arquivo_csv)
+    if resultado_conciliado is None:
+        resultado = reconciliar_historico_documental(fonte)
+    else:
+        resultado = resultado_conciliado
+        if (not isinstance(resultado, dict)
+                or not isinstance(resultado.get("sha256"), str)
+                or sha256(fonte.read_bytes()).hexdigest() != resultado["sha256"]):
+            raise ValueError("Reconciliação anterior não corresponde ao CSV atual.")
     quotes = {str(k).upper(): _positivo(v) for k, v in (cotacoes_usdt or {}).items()}
     fx = _positivo(cambio_usdt_brl)
-    fluxos_brl = _fluxos_brl_documentados(arquivo_csv)
+    fluxos_brl = _fluxos_brl_documentados(fonte)
+    if (resultado_conciliado is not None
+            and sha256(fonte.read_bytes()).hexdigest() != resultado["sha256"]):
+        raise ValueError("CSV alterado durante a apuração documental; resultados recusados.")
     agregado = defaultdict(lambda: {"saldo": ZERO, "custodias": {},
                                     "pendencias": [], "negativo_historico": False})
     for row in resultado["saldos"]:

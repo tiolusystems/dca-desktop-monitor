@@ -213,6 +213,7 @@ class JanelaHistorico(ctk.CTkFrame):
                         cotacoes_usdt=cotacoes,
                         cambio_usdt_brl=cambio,
                         instante_cotacoes=datetime.now(timezone.utc).isoformat(),
+                        resultado_conciliado=bruto,
                     )
                     report["ativos_sem_mercado_usdt"] = sem_mercado
                 erro = None
