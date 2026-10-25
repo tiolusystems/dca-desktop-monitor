@@ -107,6 +107,8 @@ class BrowserHistoricalEventsTest(unittest.TestCase):
         for params in (
             {"ativo": "BTC' OR 1=1 --"},
             {"fonte": "BINANCE_TRANSACOES' OR 1=1 --"},
+            {"ativo": 123},
+            {"fonte": 123},
             {"inicio": "2026-02-30"},
             {"inicio": "2026-01-01", "fim": "2025-12-31"},
             {"pagina": 0},
