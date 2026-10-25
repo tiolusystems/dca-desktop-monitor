@@ -56,10 +56,14 @@ def consultar_eventos_historicos(
     if (not isinstance(por_pagina, int) or isinstance(por_pagina, bool)
             or not 1 <= por_pagina <= _MAX_POR_PAGINA):
         raise ErroConsultaHistorica("Quantidade por página inválida.")
-    ativo = (ativo or "").strip().upper() if isinstance(ativo, (str, type(None))) else ""
+    if ativo is not None and not isinstance(ativo, str):
+        raise ErroConsultaHistorica("Símbolo de ativo inválido.")
+    if fonte is not None and not isinstance(fonte, str):
+        raise ErroConsultaHistorica("Fonte documental inválida.")
+    ativo = (ativo or "").strip().upper()
     if ativo and not _ATIVO.fullmatch(ativo):
         raise ErroConsultaHistorica("Símbolo de ativo inválido.")
-    fonte = (fonte or "").strip() if isinstance(fonte, (str, type(None))) else ""
+    fonte = (fonte or "").strip()
     if fonte and fonte not in FONTES:
         raise ErroConsultaHistorica("Fonte documental não reconhecida.")
     inicio, fim = _data(inicio, "Data inicial"), _data(fim, "Data final")
