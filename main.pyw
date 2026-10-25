@@ -26,6 +26,7 @@ from gui.janela_moedas import JanelaMoedas
 from gui.janela_analise_periodo import JanelaAnalisePeriodo
 from gui.janela_primeiro_uso import JanelaPrimeiroUso
 from gui.janela_aplicativo import JanelaAplicativo
+from gui.janela_historico import JanelaHistorico
 from backend.ui_dispatch import UiDispatcher
 from backend.app_lifecycle import carregar_preferencias
 from backend.tray_windows import BandejaWindows, ErroBandeja
@@ -47,6 +48,7 @@ CONFIG            = _carregar_config()
 MOEDAS_SUPORTADAS = CONFIG["moedas"]
 
 ABAS = [
+    ("📚  Histórico integral",    "aba_historico"),
     ("📈  Dashboard Geral",      "aba_distribuicao"),
     ("📊  Análise por Período",   "aba_analise"),
     ("💰  Caixa (USD/BRL)",         "aba_caixa"),
@@ -294,6 +296,11 @@ class PortfolioDCA:
         def _embutir(frame):
             frame.grid(row=0, column=0, sticky="nsew")
 
+        self.aba_historico = JanelaHistorico(
+            self.tabview.tab("📚  Histórico integral"), self.data_manager,
+        )
+        _embutir(self.aba_historico)
+
         self.aba_distribuicao = JanelaDistribuicao(
             self.tabview.tab("📈  Dashboard Geral"),
             self.data_manager, self.price_manager, self.analysis_engine,
@@ -333,6 +340,13 @@ class PortfolioDCA:
             price_manager=self.price_manager,
         )
         _embutir(self.aba_moedas)
+
+        try:
+            from backend.historical_activation import carregar_historico_ativo
+            if carregar_historico_ativo(self.data_manager._store.diretorio) is not None:
+                self.tabview.set("📚  Histórico integral")
+        except Exception as exc:
+            logger.warning("Histórico não ativado por erro de integridade: %s", exc)
 
         self.janela.after(0, self._aplicar_cursor_abas)
 
