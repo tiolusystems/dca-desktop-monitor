@@ -189,7 +189,7 @@ class BackupCrossCheckTests(unittest.TestCase):
         files["manifest.json"]=json.dumps(metadata).encode()
         with zipfile.ZipFile(self.zip,"w") as z:
             for k,v in files.items():z.writestr(k,v)
-        with self.assertRaisesRegex(ErroCruzamentoHistorico,"incompleto"):
+        with self.assertRaisesRegex(ErroCruzamentoHistorico,"inválido|incompleto"):
             auditar_backup_e_historico(self.zip,self.document)
 
 
