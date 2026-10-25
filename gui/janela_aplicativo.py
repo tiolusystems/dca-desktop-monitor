@@ -128,6 +128,19 @@ class JanelaAplicativo(ctk.CTkToplevel):
             "Sair completamente. Não inicia com o Windows nem negocia cripto.",
         ).pack_configure(pady=(0,12))
 
+        evidencias=self._box(wrap,"Histórico documental completo · conciliação")
+        self.status_historico=self._texto(
+            evidencias,
+            "Aceita CSV documental da Binance/Mercado Pago com origem, taxas por ativo "
+            "e transações de custódia. CONFERE e ARQUIVA uma cópia; não altera "
+            "operações, saldos ou lucros da carteira até conciliação auditada.",
+        )
+        self._btn_historico=ctk.CTkButton(
+            evidencias,text="Conferir e arquivar CSV documental",
+            fg_color=BG_INPUT,command=self._conferir_historico,
+        )
+        self._btn_historico.pack(anchor="w",padx=12,pady=(5,12))
+
         recovery=self._box(wrap,"Backup e recuperação segura do SQLite")
         self.status_backup=self._texto(
             recovery,
@@ -341,6 +354,63 @@ class JanelaAplicativo(ctk.CTkToplevel):
         except Exception as exc:
             self.variavel_bandeja.set(not new)
             messagebox.showerror("Preferência não salva",str(exc),parent=self)
+
+    def _conferir_historico(self):
+        """Seleção Tk na thread gráfica; leitura/cópia no worker sem tocar SQLite."""
+        caminho=filedialog.askopenfilename(
+            parent=self,title="Escolher histórico documental (NÃO CSV legado)",
+            filetypes=[("CSV documental","*.csv"),("Todos","*.*")],
+        )
+        if not caminho:
+            return
+        self._btn_historico.configure(state="disabled")
+        self.status_historico.configure(text="Verificando identidade e documentação...",text_color=CYAN)
+        def worker():
+            try:
+                from backend.historical_evidence import validar_historico_documental
+                resultado=validar_historico_documental(Path(caminho))
+                erro=None
+            except Exception as exc:
+                resultado,erro=None,str(exc)
+            def concluido():
+                if not self.winfo_exists():
+                    return
+                if erro:
+                    self._btn_historico.configure(state="normal")
+                    self.status_historico.configure(text="Histórico recusado: "+erro,text_color=NEON_RED)
+                    return
+                if not messagebox.askyesno(
+                    "Arquivar evidência documental",
+                    f"Eventos verificados: {resultado['quantidade']}.\\n"
+                    f"Fontes: {', '.join(resultado['fontes'])}.\\n"
+                    f"SHA-256: {resultado['sha256']}\\n\\n"
+                    "Será arquivada uma cópia em Dados/evidencias, sem modificar "
+                    "o banco SQLite nem o patrimônio. Continuar?",parent=self,
+                ):
+                    self._btn_historico.configure(state="normal")
+                    self.status_historico.configure(text="Conferência concluída; arquivamento cancelado.")
+                    return
+                def copiar():
+                    try:
+                        from backend.historical_evidence import arquivar_historico_documental
+                        copia=arquivar_historico_documental(
+                            Path(caminho),Path(self._db._store.diretorio),resultado["sha256"],
+                        )
+                        mensagem=("Histórico preservado: "+str(copia["quantidade"])+
+                                  " eventos. Arquivo: "+copia["copia"]+
+                                  ". O cálculo financeiro ainda NÃO foi modificado.")
+                        falha=False
+                    except Exception as exc:
+                        mensagem, falha="Cópia não concluída: "+str(exc), True
+                    def encerrar():
+                        if self.winfo_exists():
+                            self.status_historico.configure(
+                                text=mensagem,text_color=NEON_RED if falha else CYAN)
+                            self._btn_historico.configure(state="normal")
+                    self._tasks.post(encerrar)
+                self._tasks.run(copiar)
+            self._tasks.post(concluido)
+        self._tasks.run(worker)
 
     def _verificar_backups(self):
         folder=Path(self._db.arquivo_db).parent/"backups"/"sqlite"
