@@ -238,6 +238,12 @@ class JanelaHistorico(ctk.CTkFrame):
                         resultado_conciliado=bruto,
                     )
                     report["ativos_sem_mercado_usdt"] = sem_mercado
+                    # HIST-13: source may be changed while CCXT is consulting
+                    # prices. Verify both source + documentary SQLite once more.
+                    confirmado = carregar_historico_ativo(self._data_dir)
+                    if confirmado is None or confirmado != origem:
+                        raise ErroAtivacaoHistorica(
+                            "Origem histórica mudou durante atualização de preços.")
                 erro = None
             except Exception as exc:
                 erro = str(exc)
@@ -279,6 +285,28 @@ class JanelaHistorico(ctk.CTkFrame):
                         "Selecione o CSV documental integral para iniciar.\\n"
                         "O diário legado não será alterado."
                     )
+                    return
+                # HIST-13 final gate: the queued Tk callback must not publish
+                # a valuation after a manifest, pointer, or evidence DB change.
+                # The complete verification here is intentionally fail-closed;
+                # a later optimization must preserve the same security contract.
+                try:
+                    atual = carregar_historico_ativo(self._data_dir)
+                    if atual is None or atual != origem:
+                        raise ErroAtivacaoHistorica(
+                            "Fonte histórica alterada antes da apresentação.")
+                except Exception as exc:
+                    self._origem = None
+                    self._painel = None
+                    self.status.configure(
+                        text="Histórico bloqueado por integridade: " + str(exc),
+                        text_color=NEON_RED,
+                    )
+                    self.summary.configure(
+                        text="Nenhuma avaliação histórica pode ser apresentada.")
+                    self._escrever(
+                        "Dados históricos modificados durante a consulta. "
+                        "Os valores anteriores e a exportação foram bloqueados.")
                     return
                 self._origem, self._painel = origem, report
                 self._exibir(report)
@@ -345,6 +373,18 @@ class JanelaHistorico(ctk.CTkFrame):
 
     def exportar(self):
         if self._busy or self._painel is None:
+            return
+        try:
+            ativo = carregar_historico_ativo(self._data_dir)
+            if ativo is None or ativo != self._origem:
+                raise ErroAtivacaoHistorica("Fonte do relatório foi alterada.")
+        except Exception as exc:
+            self._painel = None
+            self._origem = None
+            self.summary.configure(text="Relatório anterior invalidado: integridade pendente.")
+            self._escrever("Exportação bloqueada por integridade: " + str(exc))
+            messagebox.showerror("Exportação bloqueada", str(exc),
+                                 parent=self.winfo_toplevel())
             return
         destino = filedialog.asksaveasfilename(
             parent=self.winfo_toplevel(),title="Exportar relatório (NÃO importar no DCA)",
