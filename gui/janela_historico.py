@@ -181,57 +181,80 @@ class JanelaHistorico(ctk.CTkFrame):
         self._tasks.run(validar)
 
     def recarregar(self):
+        """Validate archive, reconcile balances and fetch quotes OFF the Tk thread.
+
+        A 2021–2026 CSV plus PRAGMA integrity_check can take seconds on disk;
+        neither operation may freeze the GUI or the Linux CSV file picker.
+        """
         if self._busy:
             return
-        try:
-            origem = carregar_historico_ativo(self._data_dir)
-        except ErroAtivacaoHistorica as exc:
-            self.status.configure(
-                text="Fonte documental bloqueada por integridade: "+str(exc),
-                text_color=NEON_RED,
-            )
-            self.summary.configure(text="Carteira antiga permanece preservada.")
-            return
-        if origem is None:
-            self.status.configure(
-                text="Histórico ainda não ativado. Use Importar e ativar histórico completo (CSV).",
-                text_color=TEXT_SECONDARY,
-            )
-            return
-        self._ocupar("Lendo as movimentações e consultando preços reais...")
+        self._ocupar("Verificando a fonte documental e o banco histórico...")
         def worker():
+            origem = None
+            report = None
             try:
-                from backend.backend import PriceManager
-                from backend.historical_reconciliation import reconciliar_historico_documental
-                bruto = reconciliar_historico_documental(origem)
-                symbols = sorted({
-                    row["ativo"] for row in bruto["saldos"]
-                    if row["ativo"] not in ("BRL", "USDT")
-                    and Decimal(row["saldo_algebrico"]) != 0
-                })
-                from backend.historical_quotes import consultar_cotacoes_historicas
-                prices = PriceManager()
-                cotacoes, cambio, sem_mercado = consultar_cotacoes_historicas(
-                    prices, symbols,
-                )
-                report = calcular_painel_documental(
-                    origem,
-                    cotacoes_usdt=cotacoes,
-                    cambio_usdt_brl=cambio,
-                    instante_cotacoes=datetime.now(timezone.utc).isoformat(),
-                )
-                report["ativos_sem_mercado_usdt"] = sem_mercado
+                origem = carregar_historico_ativo(self._data_dir)
+                if origem is not None:
+                    from backend.backend import PriceManager
+                    from backend.historical_reconciliation import reconciliar_historico_documental
+                    from backend.historical_quotes import consultar_cotacoes_historicas
+                    bruto = reconciliar_historico_documental(origem)
+                    symbols = sorted({
+                        row["ativo"] for row in bruto["saldos"]
+                        if row["ativo"] not in ("BRL", "USDT")
+                        and Decimal(row["saldo_algebrico"]) != 0
+                    })
+                    prices = PriceManager()
+                    cotacoes, cambio, sem_mercado = consultar_cotacoes_historicas(
+                        prices, symbols,
+                    )
+                    report = calcular_painel_documental(
+                        origem,
+                        cotacoes_usdt=cotacoes,
+                        cambio_usdt_brl=cambio,
+                        instante_cotacoes=datetime.now(timezone.utc).isoformat(),
+                    )
+                    report["ativos_sem_mercado_usdt"] = sem_mercado
                 erro = None
             except Exception as exc:
-                report, erro = None, str(exc)
+                erro = str(exc)
+
             def done():
                 if not self.winfo_exists():
                     return
                 self._liberar()
-                if erro:
+                if erro is not None:
+                    # Never leave the previously rendered valuation looking
+                    # valid after the source or the documentary DB fails.
+                    self._origem = None
+                    self._painel = None
                     self.status.configure(
-                        text="Não foi possível montar o histórico: "+erro,
+                        text="Histórico indisponível: " + erro,
                         text_color=NEON_RED,
+                    )
+                    self.summary.configure(
+                        text="Nenhum valor histórico pode ser apresentado sem integridade."
+                    )
+                    self._escrever(
+                        "Arquivo documental ou cotações não validados. "
+                        "O banco operacional permanece preservado.\\n"
+                        + erro
+                    )
+                    return
+                if origem is None:
+                    self._origem = None
+                    self._painel = None
+                    self.status.configure(
+                        text="Histórico ainda não ativado. "
+                             "Use Importar e ativar histórico completo (CSV).",
+                        text_color=TEXT_SECONDARY,
+                    )
+                    self.summary.configure(
+                        text="Nenhum patrimônio histórico foi carregado."
+                    )
+                    self._escrever(
+                        "Selecione o CSV documental integral para iniciar.\\n"
+                        "O diário legado não será alterado."
                     )
                     return
                 self._origem, self._painel = origem, report

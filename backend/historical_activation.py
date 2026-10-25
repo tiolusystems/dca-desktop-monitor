@@ -50,7 +50,7 @@ def carregar_historico_ativo(diretorio_dados):
             raise ErroAtivacaoHistorica("Arquivo documental não encontrado ou não confiável.")
         if sha256(caminho.read_bytes()).hexdigest() != chave:
             raise ErroAtivacaoHistorica("Histórico documental modificado após a ativação.")
-        if not livro.is_file() or not _verificar_livro(livro, chave, payload["eventos"]):
+        if not livro.is_file() or not _verificar_livro(livro, chave, payload["eventos"], fonte=caminho):
             raise ErroAtivacaoHistorica("Livro histórico ausente ou com integridade inválida.")
         return caminho
     except (OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:
