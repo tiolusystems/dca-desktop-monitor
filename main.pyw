@@ -150,6 +150,16 @@ class PortfolioDCA:
         )
         self._janela_aplicativo.lift()
 
+    def _abrir_historico_documentado_direto(self):
+        """Atalho no painel principal para saldos reais documentados.
+        
+        Mantém propositalmente o diário operacional antigo intocado.
+        """
+        self._abrir_configuracoes()
+        if (self._janela_aplicativo is not None
+                and self._janela_aplicativo.winfo_exists()):
+            self._janela_aplicativo._abrir_monitor_historico()
+
     def _alterar_preferencias(self, preferencias):
         self._preferences = dict(preferencias)
 
@@ -246,6 +256,12 @@ class PortfolioDCA:
             command=self._abrir_configuracoes, height=24, width=190,
             fg_color=BG_CARD, text_color=BTC_ORANGE, hover_color=BG_SURFACE,
         ).pack(side="left", padx=(4, 8))
+        ctk.CTkButton(
+            status_bar, text="Histórico documentado (NOVO)",
+            command=self._abrir_historico_documentado_direto,
+            height=24, width=220,
+            fg_color=BG_CARD, text_color=BTC_ORANGE, hover_color=BG_SURFACE,
+        ).pack(side="left", padx=8)
         ctk.CTkButton(
             status_bar, text="Dados iniciais / Importar CSV",
             command=self._abrir_primeiro_uso, height=24, width=180,

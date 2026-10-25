@@ -157,6 +157,12 @@ class JanelaAplicativo(ctk.CTkToplevel):
             command=self._auditar_backup_historico,
         )
         self._btn_cruzar_recuperacao.pack(anchor="w",padx=12,pady=(0,12))
+        self._btn_monitor_historico=ctk.CTkButton(
+            evidencias,text="ABRIR MONITOR HISTÓRICO · saldos e cotações atuais",
+            fg_color=BTC_ORANGE,text_color=BG_SURFACE,
+            command=self._abrir_monitor_historico,
+        )
+        self._btn_monitor_historico.pack(anchor="w",padx=12,pady=(0,12))
 
         recovery=self._box(wrap,"Backup e recuperação segura do SQLite")
         self.status_backup=self._texto(
@@ -606,6 +612,187 @@ class JanelaAplicativo(ctk.CTkToplevel):
                     messagebox.showerror("Relatório não salvo",str(exc),parent=self)
             self._tasks.post(done)
         self._tasks.run(worker)
+
+    def _abrir_monitor_historico(self):
+        """Mostra quantidades documentadas e valores parciais; nunca grava P/L."""
+        base=Path(self._db._store.diretorio)/"evidencias"
+        evidencias=sorted(base.glob("historico-*.csv")) if base.is_dir() else []
+        if len(evidencias)==1:
+            origem=str(evidencias[0])
+        else:
+            origem=filedialog.askopenfilename(
+                parent=self,title="Escolher histórico integral documentado (26 colunas)",
+                filetypes=[("Histórico documental CSV","*.csv")],
+            )
+        if not origem:
+            return
+        self._btn_monitor_historico.configure(state="disabled")
+        self.status_historico.configure(
+            text="Reconstituindo posições comprovadas e consultando cotações atuais...",
+            text_color=CYAN,
+        )
+        def worker():
+            try:
+                from datetime import datetime, timezone
+                from backend.backend import PriceManager
+                from backend.historical_reconciliation import reconciliar_historico_documental
+                from backend.historical_live_monitor import calcular_painel_documental
+                base=reconciliar_historico_documental(Path(origem))
+                ativos=sorted({
+                    r["ativo"] for r in base["saldos"]
+                    if r["ativo"] not in ("BRL","USDT")
+                    and r["saldo_algebrico"] not in ("0","0.0")
+                })
+                pm=PriceManager()
+                pm.atualizar_precos(ativos)  # worker; lote Binance, falha sem inventar
+                painel=calcular_painel_documental(
+                    Path(origem),cotacoes_usdt=pm.precos_para_avaliacao(),
+                    cambio_usdt_brl=pm.taxa_brl_para_avaliacao(),
+                    instante_cotacoes=datetime.now(timezone.utc).isoformat(),
+                )
+                erro=None
+            except Exception as exc:
+                painel,erro=None,str(exc)
+            def pronto():
+                if not self.winfo_exists():
+                    return
+                self._btn_monitor_historico.configure(state="normal")
+                if erro:
+                    self.status_historico.configure(
+                        text="Monitor documental indisponível: "+erro,
+                        text_color=NEON_RED,
+                    )
+                    return
+                self.status_historico.configure(
+                    text=(f"Monitor: {painel['quantidade_ativos']} ativos, "
+                          f"{len(painel['ativos_com_lacuna_custodia'])} com lacuna "
+                          "de custódia. A carteira antiga não foi alterada."),
+                    text_color=CYAN,
+                )
+                self._mostrar_monitor_historico(painel)
+            self._tasks.post(pronto)
+        self._tasks.run(worker)
+
+    def _mostrar_monitor_historico(self,painel):
+        """Janela explícita: valores parciais não são tratados como patrimônio."""
+        from decimal import Decimal
+        from tkinter import filedialog
+        import csv
+        import json
+        janela=ctk.CTkToplevel(self)
+        janela.title("DCA · Monitor histórico documentado — NÃO é lucro consolidado")
+        janela.geometry("1110x740+90+60")
+        janela.minsize(850,550)
+        janela.transient(self)
+        janela.configure(fg_color=BG_SURFACE)
+        container=ctk.CTkFrame(janela,fg_color=BG_SURFACE)
+        container.pack(fill="both",expand=True,padx=16,pady=14)
+
+        def dinheiro(v,prefixo):
+            return ("indisponível" if v is None else
+                    prefixo+f"{Decimal(v):,.2f}".replace(",", "_")
+                    .replace(".", ",").replace("_", "."))
+
+        ctk.CTkLabel(
+            container,text="HISTÓRICO RECONSTRUÍDO · DOCUMENTOS REAIS",
+            text_color=BTC_ORANGE,font=ctk.CTkFont("Segoe UI",18,"bold"),
+        ).pack(anchor="w",padx=8,pady=(6,8))
+        ctk.CTkLabel(
+            container,
+            text=("Subtotais APENAS dos ativos com custódia e preços utilizáveis. "
+                  "Não equivalem ao patrimônio total e NÃO corrigem o dashboard antigo."),
+            text_color=NEON_RED,wraplength=1000,justify="left",
+        ).pack(anchor="w",padx=8,pady=(0,8))
+        ctk.CTkLabel(
+            container,
+            text=("Subtotal documentado e avaliável: "+
+                  dinheiro(painel["subtotal_avaliavel_brl"],"R$ ")+"  |  "+
+                  dinheiro(painel["subtotal_avaliavel_usdt"],"USDT ")+"  ·  "+
+                  f"{painel['ativos_sem_valor_integral']} ativo(s) sem valor completo."),
+            text_color=CYAN,wraplength=1000,justify="left",
+            font=ctk.CTkFont("Segoe UI",14,"bold"),
+        ).pack(anchor="w",padx=8,pady=(0,7))
+        ctk.CTkLabel(
+            container,
+            text=("Custo histórico e lucro BRL: INDISPONÍVEIS onde faltam provas. "
+                  "PTAX não substitui o preço executado de USDT. "
+                  "Valores de BRL usam apenas a cotação atual USDT/BRL da corretora."),
+            text_color=TEXT_SECONDARY,wraplength=1030,justify="left",
+        ).pack(anchor="w",padx=8,pady=(0,10))
+        caixa=ctk.CTkTextbox(
+            container,fg_color=BG_INPUT,text_color=TEXT_PRIMARY,
+            font=ctk.CTkFont("Consolas",12),wrap="none",
+        )
+        caixa.pack(fill="both",expand=True,padx=6,pady=6)
+        caixa.insert("end",f"{'ATIVO':<10} {'QUANTIDADE DOCUMENTAL':>23}   "+
+                    f"{'VALOR BRL PARCIAL':>21}   STATUS\n")
+        caixa.insert("end","-"*105+"\n")
+        for row in painel["ativos"]:
+            if row["quantidade_documental"]=="0" and not row["pendencias_custodia"]:
+                continue
+            qtd=str(row["quantidade_documental"])
+            valor=dinheiro(row["valor_brl"],"R$ ")
+            linha=f"{row['ativo']:<10} {qtd:>23}   {valor:>21}   {row['estado']}\n"
+            caixa.insert("end",linha)
+            if (Decimal(row["compras_brutas_brl_binance"])>0 or
+                    Decimal(row["vendas_brutas_brl_binance"])>0):
+                caixa.insert("end",
+                    "  ↳ Binance Spot BRL, valores BRUTOS: compras "+
+                    dinheiro(row["compras_brutas_brl_binance"],"R$ ")+
+                    "; vendas "+dinheiro(row["vendas_brutas_brl_binance"],"R$ ")+
+                    " (NÃO é custo/lucro)\n")
+            if (Decimal(row["compras_brutas_brl_mp_transcricao"])>0 or
+                    Decimal(row["vendas_brutas_brl_mp_transcricao"])>0):
+                caixa.insert("end",
+                    "  ↳ Mercado Pago (transcrição), valores BRUTOS: compras "+
+                    dinheiro(row["compras_brutas_brl_mp_transcricao"],"R$ ")+
+                    "; vendas "+dinheiro(row["vendas_brutas_brl_mp_transcricao"],"R$ ")+
+                    " (taxas desconhecidas)\n")
+            if row["pendencias_custodia"]:
+                for aviso in row["pendencias_custodia"]:
+                    caixa.insert("end","  ↳ CONCILIAR: "+aviso+"\n")
+        caixa.insert("end","\nFONTE: SHA-256 "+
+                    painel["fonte_sha256"]+"\n")
+        caixa.insert("end","Cotações consultadas UTC: "+
+                    str(painel["instante_cotacoes_utc"])+"\n")
+        caixa.insert("end","DADOS NÃO CERTIFICADOS POR SALDO FINAL DA CORRETORA. "+
+                    "SEM LUCROS ESTIMADOS.\n")
+        caixa.configure(state="disabled")
+
+        def salvar():
+            destino=filedialog.asksaveasfilename(
+                parent=janela,defaultextension=".csv",
+                initialfile="DCA-monitor-historico-PARCIAL-NAO-IMPORTAR.csv",
+                title="Exportar MONITOR (não importar como compras e vendas)",
+                filetypes=[("CSV","*.csv")],confirmoverwrite=False,
+            )
+            if not destino:
+                return
+            campos=("ativo","quantidade_documental","custodias","cotacao_atual_usdt",
+                    "valor_usdt","valor_brl","estado","pendencias_custodia",
+                    "lacuna_temporal","custo_historico_brl","lucro_prejuizo_brl",
+                    "compras_brutas_brl_binance","vendas_brutas_brl_binance",
+                    "compras_brutas_brl_mp_transcricao","vendas_brutas_brl_mp_transcricao")
+            try:
+                with Path(destino).open("x",encoding="utf-8-sig",newline="") as fp:
+                    out=csv.DictWriter(fp,fieldnames=campos)
+                    out.writeheader()
+                    for item in painel["ativos"]:
+                        linha={k:item[k] for k in campos}
+                        linha["custodias"]=json.dumps(linha["custodias"],ensure_ascii=False)
+                        linha["pendencias_custodia"]=json.dumps(
+                            linha["pendencias_custodia"],ensure_ascii=False)
+                        out.writerow(linha)
+                messagebox.showinfo("Relatório exportado",
+                    "Exportação independente: "+str(destino)+
+                    "\nNenhum dado da carteira DCA foi substituído.",
+                    parent=janela)
+            except Exception as exc:
+                messagebox.showerror("Exportação recusada",str(exc),parent=janela)
+        ctk.CTkButton(
+            container,text="Exportar quantidades e pendências (CSV separado)",
+            fg_color=BTC_ORANGE,text_color=BG_SURFACE,command=salvar,
+        ).pack(anchor="w",padx=8,pady=8)
 
     def _verificar_backups(self):
         folder=Path(self._db.arquivo_db).parent/"backups"/"sqlite"
