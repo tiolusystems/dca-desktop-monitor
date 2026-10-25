@@ -28,13 +28,17 @@ def row(n, **changes):
 
 
 def spot(n, **changes):
-    return row(n, fonte="BINANCE_SPOT",arquivo_fonte_sha256="c"*64,
+    fields=dict(
+        fonte="BINANCE_SPOT",arquivo_fonte_sha256="c"*64,
         classe_evidencia="EXECUCAO_SPOT",
         impacto_saldo="NAO_SOMAR_DUPLICA_LANCAMENTO_BINANCE",
         operacao_origem="Trade Spot",par="BTCBRL",moeda_cotacao="BRL",
         lado="BUY",preco_executado="10",
         quantidade_executada="2",valor_cotacao_executado="20",
-        quantidade_assinada="2",id_ordem="1234",**changes)
+        quantidade_assinada="2",id_ordem="1234",
+    )
+    fields.update(changes)
+    return row(n, **fields)
 
 
 class EconomicSemanticTests(unittest.TestCase):
