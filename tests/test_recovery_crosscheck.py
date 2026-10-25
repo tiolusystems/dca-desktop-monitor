@@ -9,7 +9,7 @@ import tempfile
 import unittest
 import zipfile
 
-from backend.historical_evidence import COLUNAS
+from backend.historical_evidence import COLUNAS, validar_historico_documental
 from backend.recovery_crosscheck import (
     ErroCruzamentoHistorico, auditar_backup_e_historico, exportar_comparacao,
 )
@@ -156,7 +156,7 @@ class BackupCrossCheckTests(unittest.TestCase):
             "evidencias/historico-ativo.json":json.dumps(pointer).encode(),
             f"evidencias/historico-{digest}.csv":historico,
             f"evidencias/historico-{digest}.json":json.dumps(
-                {"sha256":digest,"quantidade":len(self.rows)}).encode(),
+                validar_historico_documental(self.document)).encode(),
         }
         files.update(items)
         meta["arquivos"].update({
@@ -190,6 +190,51 @@ class BackupCrossCheckTests(unittest.TestCase):
         with zipfile.ZipFile(self.zip,"w") as z:
             for k,v in files.items():z.writestr(k,v)
         with self.assertRaisesRegex(ErroCruzamentoHistorico,"inválido|incompleto"):
+            auditar_backup_e_historico(self.zip,self.document)
+
+
+    def rewrite_zip(self, files):
+        metadata=json.loads(files["manifest.json"])
+        metadata["arquivos"]={
+            name:sha256(data).hexdigest() for name,data in files.items()
+            if name!="manifest.json"
+        }
+        files["manifest.json"]=json.dumps(metadata).encode()
+        with zipfile.ZipFile(self.zip,"w") as z:
+            for name,data in files.items():
+                z.writestr(name,data)
+
+    def test_crosscheck_rejects_tampered_evidence_manifest_even_if_zip_rehashed(self):
+        digest=self.extend_backup_with_history()
+        with zipfile.ZipFile(self.zip) as z:
+            files={item.filename:z.read(item.filename) for item in z.infolist()}
+        name=f"evidencias/historico-{digest}.json"
+        manifest=json.loads(files[name])
+        manifest["quantidade"]=999
+        files[name]=json.dumps(manifest).encode()
+        self.rewrite_zip(files)
+        with self.assertRaisesRegex(ErroCruzamentoHistorico,"inválido"):
+            auditar_backup_e_historico(self.zip,self.document)
+
+    def test_crosscheck_rejects_invalid_pointer_even_if_zip_rehashed(self):
+        self.extend_backup_with_history()
+        with zipfile.ZipFile(self.zip) as z:
+            files={item.filename:z.read(item.filename) for item in z.infolist()}
+        name="evidencias/historico-ativo.json"
+        pointer=json.loads(files[name])
+        pointer["arquivo"]="historico-inexistente.csv"
+        files[name]=json.dumps(pointer).encode()
+        self.rewrite_zip(files)
+        with self.assertRaisesRegex(ErroCruzamentoHistorico,"inválido"):
+            auditar_backup_e_historico(self.zip,self.document)
+
+    def test_crosscheck_rejects_non_object_pointer_without_unhandled_error(self):
+        self.extend_backup_with_history()
+        with zipfile.ZipFile(self.zip) as z:
+            files={item.filename:z.read(item.filename) for item in z.infolist()}
+        files["evidencias/historico-ativo.json"]=b"[]"
+        self.rewrite_zip(files)
+        with self.assertRaisesRegex(ErroCruzamentoHistorico,"inválido"):
             auditar_backup_e_historico(self.zip,self.document)
 
 
