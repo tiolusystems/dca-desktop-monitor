@@ -61,7 +61,7 @@ class MenuExistingShortcutTest(unittest.TestCase):
 class AcknowledgedUpdateMenuTest(unittest.TestCase):
     def test_two_shortcuts_retarged_only_after_gui_receipt(self):
         with TemporaryDirectory() as tmp:
-            root=Path(tmp)
+            root=Path(tmp).resolve()
             wallet=DataManager(data_dir=root/"wallet",auto_import_legacy=False)
             wallet.salvar_operacao(
                 ["2026-01-01 12:00:00","USDT","compra","10","5","10","5"])
@@ -86,7 +86,7 @@ class AcknowledgedUpdateMenuTest(unittest.TestCase):
                              "releases/download/v"+version+"/"+archive.name),
                       "sha256":sha256(archive),"tamanho":archive.stat().st_size,
                   }}
-            target_root=root/"versions"
+            target_root=(root/"versions").resolve()
             staged=preparar_instalacao(
                 info,archive,wallet.arquivo_db,
                 raiz=target_root,origem=Path(sys.executable).resolve())
