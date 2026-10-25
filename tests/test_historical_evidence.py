@@ -1,5 +1,7 @@
 """Historical documentary evidence must never mutate the operational SQLite."""
 import csv
+import os
+from unittest.mock import patch
 from hashlib import sha256
 from pathlib import Path
 import tempfile
@@ -80,6 +82,49 @@ class HistoricoDocumentalTest(unittest.TestCase):
         novamente = arquivar_historico_documental(self.csv, pasta, sha)
         self.assertTrue(novamente["ja_arquivado"])
         self.assertEqual(banco.read_bytes(), before)
+
+    def test_falha_de_publicacao_nao_deixa_csv_parcial_ou_perde_backup(self):
+        _write(self.csv, [_row()])
+        dados = self.root / "dados"
+        dados.mkdir()
+        wallet = dados / "portfolio.sqlite3"
+        wallet.write_bytes(b"BACKUP-INTOCAVEL")
+        sha = validar_historico_documental(self.csv)["sha256"]
+        with patch("backend.historical_evidence.os.link",
+                   side_effect=OSError("disco cheio")):
+            with self.assertRaisesRegex(OSError, "disco cheio"):
+                arquivar_historico_documental(self.csv, dados, sha)
+        evidencias = dados / "evidencias"
+        self.assertFalse((evidencias / f"historico-{sha}.csv").exists())
+        self.assertFalse(list(evidencias.glob(".historico-*")))
+        self.assertEqual(wallet.read_bytes(), b"BACKUP-INTOCAVEL")
+        result = arquivar_historico_documental(self.csv, dados, sha)
+        self.assertEqual(Path(result["copia"]).read_bytes(), self.csv.read_bytes())
+        self.assertEqual(wallet.read_bytes(), b"BACKUP-INTOCAVEL")
+
+    def test_falha_apos_csv_completo_recupera_manifesto_sem_regravar(self):
+        _write(self.csv, [_row()])
+        dados = self.root / "dados"
+        dados.mkdir()
+        sha = validar_historico_documental(self.csv)["sha256"]
+        link_real = os.link
+        chamadas = [0]
+        def falha_somente_no_manifesto(src, dst):
+            chamadas[0] += 1
+            if chamadas[0] == 2:
+                raise OSError("energia interrompida antes do manifesto")
+            return link_real(src, dst)
+        with patch("backend.historical_evidence.os.link",
+                   side_effect=falha_somente_no_manifesto):
+            with self.assertRaisesRegex(OSError, "energia interrompida"):
+                arquivar_historico_documental(self.csv, dados, sha)
+        destino = dados / "evidencias" / f"historico-{sha}.csv"
+        self.assertEqual(destino.read_bytes(), self.csv.read_bytes())
+        self.assertFalse((dados / "evidencias" / f"historico-{sha}.json").exists())
+        retomado = arquivar_historico_documental(self.csv, dados, sha)
+        self.assertTrue(retomado["ja_arquivado"])
+        self.assertEqual(destino.read_bytes(), self.csv.read_bytes())
+        self.assertTrue((dados / "evidencias" / f"historico-{sha}.json").exists())
 
     def test_modificacao_apos_previa_recusada(self):
         _write(self.csv, [_row()])

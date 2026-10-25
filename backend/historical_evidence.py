@@ -220,30 +220,56 @@ def arquivar_historico_documental(origem: Path, diretorio_dados: Path, sha_esper
     pasta.mkdir(parents=True, exist_ok=True)
     destino = pasta / f'historico-{info["sha256"]}.csv'
     meta = pasta / f'historico-{info["sha256"]}.json'
-    if destino.exists():
-        if sha256(destino.read_bytes()).hexdigest() != info["sha256"]:
-            raise ErroHistoricoDocumental("Arquivo anterior foi alterado; não sobrescrever.")
-        return {**info, "copia": str(destino), "ja_arquivado": True}
+    if destino.is_symlink():
+        raise ErroHistoricoDocumental("Arquivo de evidência não pode ser um link simbólico.")
+    ja_arquivado = destino.exists()
+    if ja_arquivado and sha256(destino.read_bytes()).hexdigest() != info["sha256"]:
+        raise ErroHistoricoDocumental("Arquivo anterior foi alterado; não sobrescrever.")
+
+    # HIST-10: o CSV não pode ficar truncado caso o aplicativo seja fechado,
+    # o disco encha ou a energia caia durante a cópia. Escrever e fsync em
+    # arquivo temporário; só publicar via hard link exclusivo após conferir
+    # integralmente o SHA. A operação nunca sobrescreve uma evidência.
     temporario = None
+    temp_meta = None
     try:
-        with tempfile.NamedTemporaryFile(mode="wb", prefix=".historico-", dir=pasta, delete=False) as stream:
-            temporario = Path(stream.name)
-            stream.write(Path(origem).read_bytes())
-            stream.flush()
-            os.fsync(stream.fileno())
-        if sha256(temporario.read_bytes()).hexdigest() != info["sha256"]:
-            raise ErroHistoricoDocumental("Verificação de cópia falhou.")
-        # Windows: criação exclusiva; nunca substituir um arquivo já existente.
-        with destino.open("xb") as out, temporario.open("rb") as source:
-            for bloco in iter(lambda: source.read(1024 * 1024), b""):
-                out.write(bloco)
-            out.flush()
-            os.fsync(out.fileno())
-        with meta.open("x", encoding="utf-8") as out:
-            json.dump(info, out, ensure_ascii=False, indent=2)
-            out.flush()
-            os.fsync(out.fileno())
+        if not ja_arquivado:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", prefix=".historico-", dir=pasta, delete=False,
+            ) as stream:
+                temporario = Path(stream.name)
+                stream.write(Path(origem).read_bytes())
+                stream.flush()
+                os.fsync(stream.fileno())
+            if sha256(temporario.read_bytes()).hexdigest() != info["sha256"]:
+                raise ErroHistoricoDocumental("Verificação de cópia falhou.")
+            try:
+                os.link(temporario, destino)
+            except FileExistsError:
+                # Duas ativações simultâneas do mesmo documento são idempotentes.
+                if destino.is_symlink() or sha256(destino.read_bytes()).hexdigest() != info["sha256"]:
+                    raise ErroHistoricoDocumental("Conflito de evidência; não sobrescrever.")
+                ja_arquivado = True
+        # Pode ter havido falha após publicar CSV e antes de criar metadados:
+        # recuperar a etapa sem apagar nem regravar o CSV verificado.
+        if not meta.exists():
+            with tempfile.NamedTemporaryFile(
+                mode="w", prefix=".historico-meta-", dir=pasta,
+                encoding="utf-8", delete=False,
+            ) as stream:
+                temp_meta = Path(stream.name)
+                json.dump(info, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.link(temp_meta, meta)
+            except FileExistsError:
+                pass
     finally:
         if temporario is not None:
             temporario.unlink(missing_ok=True)
-    return {**info, "copia": str(destino), "ja_arquivado": False}
+        if temp_meta is not None:
+            temp_meta.unlink(missing_ok=True)
+    if destino.is_symlink() or sha256(destino.read_bytes()).hexdigest() != info["sha256"]:
+        raise ErroHistoricoDocumental("Evidência final não passou na verificação.")
+    return {**info, "copia": str(destino), "ja_arquivado": ja_arquivado}

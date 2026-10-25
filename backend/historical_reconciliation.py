@@ -137,27 +137,36 @@ def reconciliar_historico_documental(origem: Path) -> dict:
     # Agrupamento por horário evita saldo negativo artificial quando taxa,
     # compra e gasto aparecem em várias linhas no mesmo segundo.
     agrupados = defaultdict(lambda: ZERO)
-    etiquetas = defaultdict(set)
+    # HIST-10: o agrupamento por segundo serve SOMENTE para a cronologia.
+    # Somar as entradas e saídas depois de compensar compras e vendas do
+    # mesmo segundo apagava volume bruto real, embora o saldo líquido
+    # permanecesse correto. Guardar fluxos brutos por evento/custódia.
+    brutos = defaultdict(lambda: {"entradas": ZERO, "saidas": ZERO})
     for dia, i, conta, ativo, delta, classe in movimentos:
         chave = (dia, conta, ativo)
         agrupados[chave] += delta
-        etiquetas[chave].add(classe)
+        if delta >= ZERO:
+            brutos[(conta, ativo)]["entradas"] += delta
+        else:
+            brutos[(conta, ativo)]["saidas"] -= delta
     estados = defaultdict(_novo)
     for (dia, conta, ativo), delta in sorted(agrupados.items()):
-        classes = etiquetas[(dia, conta, ativo)]
         # Taxas e juros são retidos separadamente em sua quantidade original;
         # o efeito financeiro já está no delta agregado, não se reaplica.
         estado = estados[(conta, ativo)]
-        if delta >= ZERO:
-            estado["entradas"] += delta
-        else:
-            estado["saidas"] -= delta
         estado["saldo"] += delta
         estado["eventos"] += 1
         if estado["saldo"] < estado["menor"]:
             estado["menor"] = estado["saldo"]
             if not estado["primeiro_negativo"]:
                 estado["primeiro_negativo"] = dia
+
+    # Entradas e saídas não são o netting intrassegundo: preservam
+    # rigorosamente o fluxo documentado. Em especial, Earn/Spot representam
+    # custodias distintas, não vendas nem novos investimentos.
+    for chave, valores in brutos.items():
+        estados[chave]["entradas"] = valores["entradas"]
+        estados[chave]["saidas"] = valores["saidas"]
 
     for dia, i, conta, ativo, delta, classe in movimentos:
         estado = estados[(conta, ativo)]
