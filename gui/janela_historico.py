@@ -288,7 +288,7 @@ class JanelaHistorico(ctk.CTkFrame):
                   ". NÃO inclui ativos sem preço/custódia verificável."),
         )
         lines = [
-            f"{'ATIVO':<9} {'QUANTIDADE REAL DOCUMENTADA':>27} "
+            f"{'ATIVO':<9} {'SALDO DOC. NÃO CERTIFICADO':>27} "
             f"{'VALOR BRL':>19}  SITUAÇÃO",
             "-" * 110,
         ]
