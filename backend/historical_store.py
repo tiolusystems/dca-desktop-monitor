@@ -9,6 +9,7 @@ import csv
 from contextlib import closing
 from datetime import datetime, timezone
 from hashlib import sha256
+from itertools import zip_longest
 import json
 import os
 from pathlib import Path
@@ -25,14 +26,71 @@ class ErroLivroDocumental(ValueError):
     pass
 
 
-def _verificar_livro(arquivo: Path, hash_fonte: str, quantidade: int) -> bool:
+def _verificar_livro(arquivo: Path, hash_fonte: str, quantidade: int,
+                    fonte: Path | None = None) -> bool:
+    """Fail closed on SQLite corruption AND valid-SQLite content manipulation.
+
+    PRAGMA integrity_check only checks B-tree structure, not that stored
+    transactions and custody totals match the immutable, SHA-pinned CSV.
+    """
     try:
-        with closing(sqlite3.connect(arquivo.resolve().as_uri()+"?mode=ro",uri=True)) as db:
-            ok=db.execute("PRAGMA integrity_check").fetchone()[0]
-            meta=db.execute("SELECT sha256_fonte,quantidade_eventos,versao FROM manifesto").fetchone()
-            count=db.execute("SELECT COUNT(*) FROM eventos").fetchone()[0]
-            return ok=="ok" and meta==(hash_fonte,quantidade,VERSAO) and count==quantidade
-    except sqlite3.DatabaseError:
+        with closing(sqlite3.connect(arquivo.resolve().as_uri()+"?mode=ro", uri=True)) as db:
+            if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                return False
+            meta = db.execute(
+                "SELECT sha256_fonte, quantidade_eventos, versao, marcador FROM manifesto"
+            ).fetchall()
+            if meta != [(hash_fonte, quantidade, VERSAO,
+                         "DOCUMENTAL_NAO_SUBSTITUI_FINANCEIRO")]:
+                return False
+            count = db.execute("SELECT COUNT(*) FROM eventos").fetchone()[0]
+            if count != quantidade:
+                return False
+            if fonte is None:
+                return True
+
+            fonte = Path(fonte)
+            if sha256(fonte.read_bytes()).hexdigest() != hash_fonte:
+                return False
+            campos = (
+                "id_evento", "data_hora", "fonte", "classe_evidencia", "conta",
+                "ativo", "quantidade_assinada", "taxa_quantidade", "taxa_moeda",
+                "taxa_brl_efetiva", "custo_aquisicao",
+            )
+            sql = db.execute(
+                "SELECT " + ", ".join(campos) +
+                ", payload_json FROM eventos ORDER BY id_evento"
+            )
+            with fonte.open(encoding="utf-8-sig", newline="") as arquivo_csv:
+                expected_rows = sorted(
+                    csv.DictReader(arquivo_csv, strict=True),
+                    key=lambda item: item["id_evento"],
+                )
+            for original, armazenado in zip_longest(expected_rows, sql):
+                if original is None or armazenado is None:
+                    return False
+                expected = tuple(original[k] for k in campos) + (
+                    json.dumps(original, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":")),
+                )
+                if armazenado != expected:
+                    return False
+
+            # Verify that derived custody balances were not altered either.
+            # A modified SQLite can pass PRAGMA integrity_check and row counts.
+            previa = reconciliar_historico_documental(fonte)
+            expected_saldos = sorted(
+                (row["custodia"], row["ativo"], row["saldo_algebrico"],
+                 row["menor_saldo_no_periodo"], row["status"], None)
+                for row in previa["saldos"]
+            )
+            saldos = db.execute(
+                "SELECT custodia, ativo, saldo_algebrico, menor_saldo, status, "
+                "custo_brl FROM saldos_documentais ORDER BY custodia, ativo"
+            ).fetchall()
+            return saldos == expected_saldos
+    except (sqlite3.DatabaseError, OSError, UnicodeError, csv.Error,
+            ValueError, KeyError, TypeError):
         return False
 
 
@@ -54,7 +112,7 @@ def construir_livro_documental(origem: Path, diretorio_dados: Path) -> dict:
     if destino.resolve()==carteira:
         raise ErroLivroDocumental("Recusada substituição do SQLite financeiro.")
     if destino.exists():
-        if not _verificar_livro(destino,dados["sha256"],dados["quantidade"]):
+        if not _verificar_livro(destino,dados["sha256"],dados["quantidade"],fonte=fonte):
             raise ErroLivroDocumental("Livro documental existente inválido; não sobrescrever.")
         return {"arquivo":str(destino),"eventos":dados["quantidade"],
                 "sha256_fonte":dados["sha256"],"ja_existia":True,
@@ -112,16 +170,16 @@ def construir_livro_documental(origem: Path, diretorio_dados: Path) -> dict:
             if sha256(fonte.read_bytes()).hexdigest()!=dados["sha256"]:
                 raise ErroLivroDocumental("CSV alterado durante a escrituração; abortado.")
             db.commit()
-        if not _verificar_livro(temp,dados["sha256"],dados["quantidade"]):
+        if not _verificar_livro(temp,dados["sha256"],dados["quantidade"],fonte=fonte):
             raise ErroLivroDocumental("Livro gerado falhou na conferência de integridade.")
         # Não usar replace() para sobrescrever cópia anterior: link exclusivo,
         # mesma partição, falha caso arquivo alvo já exista (idempotência).
         try:
             os.link(temp,destino)
         except FileExistsError:
-            if not _verificar_livro(destino,dados["sha256"],dados["quantidade"]):
+            if not _verificar_livro(destino,dados["sha256"],dados["quantidade"],fonte=fonte):
                 raise ErroLivroDocumental("Conflito na criação do livro documental.")
-        if not _verificar_livro(destino,dados["sha256"],dados["quantidade"]):
+        if not _verificar_livro(destino,dados["sha256"],dados["quantidade"],fonte=fonte):
             raise ErroLivroDocumental("Livro final não passou na verificação.")
     finally:
         temp.unlink(missing_ok=True)
