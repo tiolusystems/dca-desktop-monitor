@@ -40,7 +40,7 @@ def _fluxos_brl_documentados(arquivo_csv):
                                   "mp_venda_transcrita": ZERO})
     with Path(arquivo_csv).open(encoding="utf-8-sig", newline="") as fp:
         for row in csv.DictReader(fp, strict=True):
-            ativo = row["ativo"].upper()
+            ativo = row["ativo"].strip().upper()
             if row["fonte"] == "BINANCE_SPOT" and row["moeda_cotacao"] == "BRL":
                 tipo = row["lado"].upper()
                 campo = ("binance_compra" if tipo == "BUY" else
@@ -94,12 +94,12 @@ def calcular_painel_documental(arquivo_csv: Path, *, cotacoes_usdt=None,
     agregado = defaultdict(lambda: {"saldo": ZERO, "custodias": {},
                                     "pendencias": [], "negativo_historico": False})
     for row in resultado["saldos"]:
-        ativo = row["ativo"].upper()
+        ativo = row["ativo"].strip().upper()
         conta = row["custodia"]
         qtd = Decimal(row["saldo_algebrico"])
         item = agregado[ativo]
         item["saldo"] += qtd
-        item["custodias"][conta] = str(qtd)
+        item["custodias"][conta] = str(Decimal(item["custodias"].get(conta, "0")) + qtd)
         if qtd < ZERO:
             item["pendencias"].append(
                 f"{conta}: saldo final negativo {qtd} {ativo}")
