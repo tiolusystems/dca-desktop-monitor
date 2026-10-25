@@ -11,6 +11,17 @@ O arquivo de 13.218 eventos é documental, não é `meu_diario_operacoes.csv` e 
 - Interface DCA: botão **Conferir saldos históricos e exportar CSV**, usa worker assíncrono; relatório pode ser salvo em outro CSV mas **nunca** mexe no `portfolio.sqlite3`. Não permite sobrescrever o mesmo relatório ou o CSV fonte.
 - Testes sintéticos para deduplicação, taxas BTC, mesma data/hora, Earn, origem externa e custo desconhecido.
 
+## Banco documental SQLite independente
+
+A função `backend.historical_store.construir_livro_documental` pode materializar os
+eventos validados (incluindo 13.218 eventos do arquivo real) em banco
+`<dados>/evidencias/livro-<SHA256>.sqlite3`, verificando contagem, SHA da fonte,
+integridade SQLite e salvando tanto JSON integral de cada evento quanto o saldo
+derivado por conta/ativo, com custo desconhecido representado por `NULL`.
+É idempotente por hash; nunca sobrescreve arquivo preexistente e nunca abre
+`portfolio.sqlite3`. A interface permite preparar esse livro em separado pelo
+botão **Preparar banco histórico separado (SQLite)**. Não é uma migração da carteira.
+
 ## Limites e bloqueios de publicação de P/L
 
 A conciliação documental é cálculo independente e **não alimenta ainda os cards do painel financeiro**. Não existe autorização para reinstalar e substituir o SQLite ou migrar saldos sem snapshot atual, comparação, aprovação e testes de recuperação. Alguns saldos negativos também podem resultar de lacunas na origem, movimentações não exportadas ou de modalidades de custódia não espelhadas neste estágio; não servem de indicação para criar compras adicionais. **Não calcule lucro/prejuízo BRL a partir da PTAX para negócios USDT.** Os ganhos de staking/Earn são quantidades; avaliação fiscal depende de documentação adicional.
