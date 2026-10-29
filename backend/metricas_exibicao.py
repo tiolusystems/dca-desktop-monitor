@@ -1,8 +1,48 @@
 from __future__ import annotations
 
+import math
+
+
+_CAMPOS_MONETARIOS = ("pmc", "custo", "pl_nr", "pl_r", "pl_tot", "comprado")
+
 
 def _num(valor):
     return None if valor is None else float(valor)
+
+
+def taxa_brl_atual_valida(taxa_brl) -> float | None:
+    """Retorna a taxa atual utilizável apenas para apresentação monetária."""
+    try:
+        taxa = float(taxa_brl)
+    except (TypeError, ValueError):
+        return None
+    return taxa if math.isfinite(taxa) and taxa > 0 else None
+
+
+def metricas_usdt_para_brl_atual(metricas: dict, taxa_brl) -> dict:
+    """Converte métricas já apuradas em USDT para equivalente BRL atual.
+
+    Esta função não consulta nem substitui o livro histórico em BRL.  ``None``
+    continua significando dado financeiro desconhecido; sem uma taxa atual
+    válida, toda métrica monetária também permanece indisponível.
+    """
+    taxa = taxa_brl_atual_valida(taxa_brl)
+    resultado = dict(metricas)
+    for campo in _CAMPOS_MONETARIOS:
+        valor = metricas.get(campo)
+        resultado[campo] = None if valor is None or taxa is None else valor * taxa
+    return resultado
+
+
+def totais_usdt_para_brl_atual(totais: tuple, taxa_brl) -> tuple:
+    """Converte os totais do Dashboard sem alterar o indicador ``estimado``."""
+    custo, pl_nr, pl_r, comprado, estimado = totais
+    taxa = taxa_brl_atual_valida(taxa_brl)
+
+    def converter(valor):
+        return None if valor is None or taxa is None else valor * taxa
+
+    return converter(custo), converter(pl_nr), converter(pl_r), converter(comprado), estimado
 
 
 def metricas_ativo(dados: dict, livro_brl: dict | None = None, *,

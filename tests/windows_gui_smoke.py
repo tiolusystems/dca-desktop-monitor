@@ -315,8 +315,9 @@ def main():
             assert d["totais"]["caixa_usdt"] == 1579, d["totais"]
             assert d["BTC"]["lucro_nao_realizado"] == 9
             print("GUI_FIN05_CAMPO_E_CALCULO=PASS")
-            # FIN-06: UI must not mistake trade volume for portfolio return,
-            # nor translate historic USD P/L using today's BRL exchange rate.
+            # FIN-06: UI must not mistake trade volume for portfolio return.
+            # Known USDT values can nevertheless be shown as an explicitly
+            # labelled equivalent at the current BRL exchange rate.
             from backend.financial_audit import auditar_carteira_atual
             from backend.backend import AnalysisEngine
             def fatia(dia, moeda, tipo, valor, preco, quantidade):
@@ -345,14 +346,13 @@ def main():
             root.update_idletasks()
             pump(root)
             assert dash._lbl_retorno.cget("text") == "+10.00%"
-            # A missing documented BRL book cannot be relabeled from
-            # historical USDT profit. In BRL view, fail closed.
-            assert dash._lbl_pl_r.cget("text") == "Indisponível", dash._lbl_pl_r.cget("text")
-            assert dash._lbl_pl.cget("text") == "Indisponível", dash._lbl_pl.cget("text")
-            assert dash._lbl_custo.cget("text") == "Indisponível", dash._lbl_custo.cget("text")
-            print("GUI_FIN06_BRL_SEM_LIVRO_INDISPONIVEL=PASS")
+            assert dash._lbl_pl_r.cget("text") == "R$510.00", dash._lbl_pl_r.cget("text")
+            assert dash._lbl_pl.cget("text") == "R$510.00", dash._lbl_pl.cget("text")
+            assert dash._lbl_custo.cget("text") == "R$0.00", dash._lbl_custo.cget("text")
+            assert "equivalente à cotação atual" in dash._lbl_legenda.cget("text")
+            print("GUI_FIN06_EQUIVALENTE_BRL_ATUAL=PASS")
             # Switching explicitly to USDT restores the known 100 USDT
-            # result without deriving fictional BRL cost or profit.
+            # result without mutating the financial result in USDT.
             dash.display_currency = "USD"
             dash._atualizar_ui(portfolio_audit, None, dist_audit, 5.10, audit)
             root.update_idletasks()
