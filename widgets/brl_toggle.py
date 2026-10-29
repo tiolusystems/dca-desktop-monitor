@@ -78,7 +78,8 @@ class BRLToggle(ctk.CTkFrame):
 
     def _on_toggle(self):
         if self.var.get():
-            taxa = self._price_manager.preco_brl
+            obter_taxa = getattr(self._price_manager, "taxa_brl_para_avaliacao", None)
+            taxa = obter_taxa() if callable(obter_taxa) else self._price_manager.preco_brl
             if taxa is None or taxa <= 0:
                 messagebox.showwarning("Aviso", "Cotação do BRL indisponível. Exibindo USD.")
                 self.var.set(False)
