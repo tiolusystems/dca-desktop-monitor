@@ -1,4 +1,4 @@
-"""Optional Windows tray icon. Never starts without explicit user preference."""
+"""Windows tray icon started whenever the user closes the main window."""
 from pathlib import Path
 import sys
 

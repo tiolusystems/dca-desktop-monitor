@@ -584,10 +584,6 @@ def main():
             assert settings.btn_atalho.cget("state") == "disabled"
             backups,invalid=settings._verificar_backups()
             assert backups and not invalid
-            assert settings.variavel_bandeja.get() is False
-            settings.variavel_bandeja.set(True)
-            settings._alternar_bandeja()
-            assert app._preferences["minimizar_para_bandeja"] is True
             with patch.object(app._tray,"iniciar") as started:
                 app._on_closing()
                 started.assert_called_once()
@@ -603,10 +599,8 @@ def main():
                 pump(root)
                 assert not app._tray_hidden and root.winfo_viewable()
                 print('GUI_WINDOWS_NATIVE_TRAY_HIDE_RESTORE=PASS')
-            settings.variavel_bandeja.set(False)
-            settings._alternar_bandeja()
-            assert not app._preferences["minimizar_para_bandeja"]
-            print("GUI_DIST_SETTINGS_TRAY_BACKUP=PASS")
+            assert not hasattr(settings,"variavel_bandeja")
+            print("GUI_DIST_SETTINGS_TRAY_ALWAYS_ON_CLOSE=PASS")
             settings.destroy()
 
             # OPS-01: repeated refresh requests must not start parallel
@@ -621,7 +615,9 @@ def main():
                 if acquired:
                     app._refresh_lock.release()
             assert app._closing is False
-            app._on_closing()
+            # O encerramento de teste representa "Sair completamente"; um
+            # fechamento normal agora permanece obrigatoriamente na bandeja.
+            app._on_closing(force=True)
             assert app._closing and not app._countdown_ativo
             assert app.aba_caixa._tasks.closed and app.aba_distribuicao._tasks.closed
             assert app.aba_edicao._tasks.closed
