@@ -28,7 +28,6 @@ from gui.janela_primeiro_uso import JanelaPrimeiroUso
 from gui.janela_aplicativo import JanelaAplicativo
 from gui.janela_historico import JanelaHistorico
 from backend.ui_dispatch import UiDispatcher
-from backend.app_lifecycle import carregar_preferencias
 from backend.tray_windows import BandejaWindows, ErroBandeja
 
 from config.tema_cripto import (
@@ -71,11 +70,6 @@ class PortfolioDCA:
         self._primeiro_uso_janela = None
         self._janela_aplicativo = None
         self._tray_hidden = False
-        try:
-            self._preferences = carregar_preferencias(data_manager._store.diretorio)
-        except Exception as exc:
-            logger.warning("Preferências do Windows inválidas; modo bandeja DESLIGADO: %s", exc)
-            self._preferences = {"minimizar_para_bandeja": False}
         self._tray = BandejaWindows(
             ao_abrir=lambda: self._agendar_ui(self._restaurar_da_bandeja),
             ao_atualizar=lambda: self._agendar_ui(self.atualizar_todas_as_analises),
@@ -148,7 +142,6 @@ class PortfolioDCA:
         self._janela_aplicativo = JanelaAplicativo(
             self.janela, self.data_manager,
             ao_restaurar=self._restaurar_fora_app,
-            ao_alterar_preferencia=self._alterar_preferencias,
             ao_instalar=lambda: self._on_closing(force=True),
         )
         self._janela_aplicativo.lift()
@@ -162,9 +155,6 @@ class PortfolioDCA:
         if (self._janela_aplicativo is not None
                 and self._janela_aplicativo.winfo_exists()):
             self._janela_aplicativo._abrir_monitor_historico()
-
-    def _alterar_preferencias(self, preferencias):
-        self._preferences = dict(preferencias)
 
     def _preparar_primeiro_atalho(self):
         if self._closing or '--update-ready' in sys.argv:
@@ -561,7 +551,7 @@ class PortfolioDCA:
     def _on_closing(self, *, force: bool = False) -> None:
         if self._closing:
             return
-        if not force and self._preferences.get("minimizar_para_bandeja", False):
+        if not force and sys.platform == "win32":
             try:
                 self._tray.iniciar()
                 self.janela.withdraw()
@@ -572,7 +562,7 @@ class PortfolioDCA:
                 from tkinter import messagebox
                 messagebox.showwarning(
                     "Bandeja indisponível",
-                    str(exc)+" Desative a opção ou utilize Sair completamente.",
+                    str(exc)+" O DCA continua aberto; use Sair completamente quando desejar encerrar.",
                     parent=self.janela,
                 )
                 return

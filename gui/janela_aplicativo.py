@@ -1,5 +1,5 @@
 from backend.ui_dispatch import UiDispatcher
-"""Desktop settings: update checks, explicit shortcut, tray opt-in and backup recovery."""
+"""Desktop settings: update checks, shortcuts, tray behavior and backup recovery."""
 from pathlib import Path
 from tkinter import filedialog, messagebox
 import sys
@@ -7,8 +7,7 @@ import threading
 import customtkinter as ctk
 
 from backend.app_lifecycle import (
-    APP_VERSION, carregar_preferencias, salvar_preferencias,
-    verificar_release_estavel, baixar_atualizacao_verificada,
+    APP_VERSION, verificar_release_estavel, baixar_atualizacao_verificada,
     preparar_atualizacao_manual,
 )
 from backend.backup_sqlite import (
@@ -22,7 +21,7 @@ from config.tema_cripto import (
 
 class JanelaAplicativo(ctk.CTkToplevel):
     def __init__(self, parent, data_manager, *, ao_restaurar=None,
-                 ao_alterar_preferencia=None, ao_instalar=None):
+                 ao_instalar=None):
         super().__init__(parent)
         self.transient(parent)
         self._tasks = UiDispatcher(self)
@@ -31,12 +30,10 @@ class JanelaAplicativo(ctk.CTkToplevel):
         self.minsize(780,560)
         self._db=data_manager
         self._on_restore=ao_restaurar
-        self._on_pref=ao_alterar_preferencia
         self._on_install=ao_instalar
         self._manifesto_escolhido=None
         self._atualizacao_encontrada=None
         self._download_verificado=None
-        self._pref=carregar_preferencias(self._db._store.diretorio)
         self.configure(fg_color=BG_SURFACE)
         wrap=ctk.CTkScrollableFrame(
             self,fg_color="transparent",scrollbar_button_color=BORDER,
@@ -109,24 +106,12 @@ class JanelaAplicativo(ctk.CTkToplevel):
             )
 
         second=self._box(wrap,"Segundo plano (Windows)")
-        self.variavel_bandeja=ctk.BooleanVar(
-            value=self._pref["minimizar_para_bandeja"],
-        )
-        self._switch=ctk.CTkSwitch(
-            second,variable=self.variavel_bandeja,
-            text="Ao fechar a janela, minimizar para a bandeja",
-            command=self._alternar_bandeja,
-            fg_color=BG_INPUT,progress_color=BTC_ORANGE,
-            text_color=TEXT_PRIMARY,
-        )
-        self._switch.pack(anchor="w",padx=12,pady=(9,6))
-        if sys.platform != 'win32':
-            self._switch.configure(state='disabled')
         self._texto(
             second,
-            "Desativado por padrão. Na bandeja: Abrir, Atualizar cotações, "
-            "Sair completamente. Não inicia com o Windows nem negocia cripto.",
-        ).pack_configure(pady=(0,12))
+            "No Windows, fechar a janela sempre mantém o DCA em segundo plano "
+            "na bandeja. Use Sair completamente no ícone da bandeja para encerrar. "
+            "Não inicia com o Windows nem negocia cripto.",
+        ).pack_configure(padx=12,pady=(9,12))
 
         evidencias=self._box(wrap,"Histórico documental completo · conciliação")
         self.status_historico=self._texto(
@@ -363,20 +348,6 @@ class JanelaAplicativo(ctk.CTkToplevel):
             )
         except Exception as exc:
             messagebox.showerror("Atalho não criado",str(exc),parent=self)
-
-    def _alternar_bandeja(self):
-        new=bool(self.variavel_bandeja.get())
-        try:
-            saved=salvar_preferencias(
-                {"minimizar_para_bandeja":new},
-                self._db._store.diretorio,
-            )
-            self._pref=saved
-            if self._on_pref:
-                self._on_pref(saved)
-        except Exception as exc:
-            self.variavel_bandeja.set(not new)
-            messagebox.showerror("Preferência não salva",str(exc),parent=self)
 
     def _conferir_historico(self):
         """Seleção Tk na thread gráfica; leitura/cópia no worker sem tocar SQLite."""
